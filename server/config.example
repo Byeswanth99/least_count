@@ -1,0 +1,16 @@
+# Server Configuration Example
+# Copy this to .env or set as environment variables
+
+# Server Port
+PORT=3001
+
+# Logging Level
+# Options: none, error, warn, info, debug
+# Recommendation: 
+#   - Production: none (ZERO log storage cost)
+#   - Production (safe): error (minimal cost, only errors)
+#   - Development: info or debug
+LOG_LEVEL=info
+
+# Node Environment
+NODE_ENV=development

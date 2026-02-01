@@ -4,6 +4,7 @@ import { Card } from './Card';
 import { PlayerAvatar } from './PlayerAvatar';
 import { Scoreboard } from './Scoreboard';
 import { calculateHandValue } from '../utils/cardUtils';
+import { useSoundEffects } from '../hooks/useSoundEffects';
 
 interface GameBoardProps {
   gameState: GameState;
@@ -29,6 +30,8 @@ export function GameBoard({
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
   const [localCardOrder, setLocalCardOrder] = useState<string[]>([]); // Store card IDs in user's preferred order
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const { playSound } = useSoundEffects();
 
   const currentPlayer = gameState.players.find(p => p.id === playerId);
   const isMyTurn = gameState.currentTurnPlayerId === playerId;
@@ -108,13 +111,17 @@ export function GameBoard({
     return () => clearInterval(interval);
   }, [isMyTurn, gameState.turnStartTime, gameState.settings.timerEnabled, gameState.settings.timerDuration, gameState.turnTimeLimit]);
 
-  // Reset discard state when turn changes
+  // Reset discard state when turn changes and play notification sound
   useEffect(() => {
     if (isMyTurn) {
       setHasDiscarded(false);
       setSelectedCards([]);
+      // Play turn notification sound when it becomes your turn
+      if (soundEnabled) {
+        playSound('turnNotification');
+      }
     }
-  }, [gameState.currentTurnPlayerId]);
+  }, [gameState.currentTurnPlayerId, isMyTurn, soundEnabled, playSound]);
 
   // Reset card order when round changes
   useEffect(() => {
@@ -123,6 +130,11 @@ export function GameBoard({
 
   const handleCardClick = (cardId: string) => {
     if (hasDiscarded || !isMyTurn) return;
+
+    // Play selection sound
+    if (soundEnabled) {
+      playSound('select');
+    }
 
     setSelectedCards(prev => {
       if (prev.includes(cardId)) {
@@ -143,6 +155,12 @@ export function GameBoard({
 
   const handleDiscard = () => {
     if (!isMyTurn || hasDiscarded || selectedCards.length === 0) return;
+    
+    // Play discard sound
+    if (soundEnabled) {
+      playSound('discard');
+    }
+    
     onDiscardCards(selectedCards);
     setSelectedCards([]);
     setHasDiscarded(true);
@@ -150,6 +168,12 @@ export function GameBoard({
 
   const handleDraw = (source: 'deck' | 'discard') => {
     if (!isMyTurn || !hasDiscarded) return;
+    
+    // Play draw sound
+    if (soundEnabled) {
+      playSound('draw');
+    }
+    
     onDrawCard(source);
     setHasDiscarded(false);
   };
@@ -311,12 +335,21 @@ export function GameBoard({
           </div>
         )}
 
-        <button
-          onClick={() => setShowScoreboard(true)}
-          className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-2 py-1 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-base font-semibold transition-all"
-        >
-          📊 <span className="hidden sm:inline">Scoreboard</span>
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setSoundEnabled(!soundEnabled)}
+            className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-2 py-1 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-base font-semibold transition-all"
+            title={soundEnabled ? "Mute sounds" : "Enable sounds"}
+          >
+            {soundEnabled ? '🔊' : '🔇'}
+          </button>
+          <button
+            onClick={() => setShowScoreboard(true)}
+            className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-2 py-1 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-base font-semibold transition-all"
+          >
+            📊 <span className="hidden sm:inline">Scoreboard</span>
+          </button>
+        </div>
       </div>
 
       {/* Other Players (Top Layout) - Shows in anti-clockwise order from your perspective */}

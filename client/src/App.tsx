@@ -12,19 +12,18 @@ function App() {
   const [appState, setAppState] = useState<AppState>('lobby');
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [playerId, setPlayerId] = useState<string>('');
-  const [error, setError] = useState<string>('');
 
   useEffect(() => {
     if (!socket) return;
 
     // Listen for connect event to get socket.id
     const handleConnect = () => {
-      setPlayerId(socket.id);
+      setPlayerId(socket.id || '');
     };
 
     // If already connected, set immediately
     if (socket.connected) {
-      setPlayerId(socket.id);
+      setPlayerId(socket.id || '');
     }
 
     socket.on('connect', handleConnect);
@@ -97,9 +96,8 @@ function App() {
       if (response.success) {
         setGameState(response.gameState);
         setAppState('waitingRoom');
-        setError('');
       } else {
-        setError(response.error || 'Failed to create room');
+        alert(response.error || 'Failed to create room');
       }
     });
   };
@@ -111,9 +109,7 @@ function App() {
       if (response.success) {
         setGameState(response.gameState);
         setAppState('waitingRoom');
-        setError('');
       } else {
-        setError(response.error || 'Failed to join room');
         alert(response.error || 'Failed to join room');
       }
     });
@@ -124,7 +120,6 @@ function App() {
 
     socket.emit('startGame', (response: any) => {
       if (!response.success) {
-        setError(response.error || 'Failed to start game');
         alert(response.error || 'Failed to start game');
       }
     });

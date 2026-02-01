@@ -1,9 +1,9 @@
-import { Card as CardType } from '../types/game';
+import { Card as CardType, Rank } from '../types/game';
 import { getCardSymbol, getCardColor, formatCardRank, isWildCard } from '../utils/cardUtils';
 
 interface CardProps {
   card: CardType;
-  wildCardRank: string | null;
+  wildCardRank: Rank | null;
   isSelected?: boolean;
   onClick?: () => void;
   size?: 'small' | 'medium' | 'large';

@@ -1,0 +1,28 @@
+services:
+  # Backend Server
+  - type: web
+    name: least-count-server
+    env: node
+    region: singapore
+    buildCommand: cd server && npm install && npm run build
+    startCommand: cd server && npm start
+    envVars:
+      - key: LOG_LEVEL
+        value: error
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+    healthCheckPath: /health
+
+  # Frontend Static Site
+  - type: web
+    name: least-count-client
+    env: static
+    region: singapore
+    buildCommand: cd client && npm install && npm run build
+    staticPublishPath: ./client/dist
+    envVars:
+      - key: VITE_SOCKET_URL
+        sync: false
+        # This will be set manually to your backend URL after backend deploys

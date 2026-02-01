@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { GameState, Card as CardType, RoundEndData } from '../types/game';
+import { GameState } from '../types/game';
 import { Card } from './Card';
 import { PlayerAvatar } from './PlayerAvatar';
 import { Scoreboard } from './Scoreboard';
@@ -26,8 +26,6 @@ export function GameBoard({
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [hasDiscarded, setHasDiscarded] = useState(false);
   const [timeLeft, setTimeLeft] = useState(30);
-  const [showRoundEnd, setShowRoundEnd] = useState(false);
-  const [roundEndData, setRoundEndData] = useState<RoundEndData | null>(null);
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
   const [localCardOrder, setLocalCardOrder] = useState<string[]>([]); // Store card IDs in user's preferred order

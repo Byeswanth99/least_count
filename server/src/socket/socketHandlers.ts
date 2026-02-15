@@ -15,7 +15,10 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
         
         const room = roomManager.getRoom(roomCode);
         if (room) {
-          callback({ success: true, roomCode, gameState: room.getState() });
+          const state = room.getState();
+          const host = state.players.find(p => p.id === socket.id);
+          const playerToken = host?.playerToken;
+          callback({ success: true, roomCode, gameState: state, playerToken });
         }
       } catch (error) {
         callback({ success: false, error: 'Failed to create room' });
@@ -38,7 +41,9 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
         }
 
         socket.join(data.roomCode);
-        callback({ success: true, gameState: room.getState() });
+        const state = room.getState();
+        const me = state.players.find(p => p.id === socket.id);
+        callback({ success: true, gameState: state, playerToken: me?.playerToken });
 
         // Notify all players in room
         io.to(data.roomCode).emit('playerJoined', {
@@ -46,6 +51,28 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
         });
       } catch (error) {
         callback({ success: false, error: 'Failed to join room' });
+      }
+    });
+
+    // Rejoin Room (after browser refresh) – same seat via playerToken
+    socket.on('rejoinRoom', (data: { roomCode: string; playerToken: string }, callback) => {
+      try {
+        const room = roomManager.getRoom(data.roomCode);
+        if (!room) {
+          callback({ success: false, error: 'Room not found or expired' });
+          return;
+        }
+        const ok = room.rejoinPlayer(data.playerToken, socket.id);
+        if (!ok) {
+          callback({ success: false, error: 'Invalid rejoin token or player not in room' });
+          return;
+        }
+        socket.join(data.roomCode);
+        const gameState = room.getState();
+        callback({ success: true, gameState });
+        io.to(data.roomCode).emit('playerReconnected', { playerId: socket.id, players: gameState.players });
+      } catch (error) {
+        callback({ success: false, error: 'Rejoin failed' });
       }
     });
 

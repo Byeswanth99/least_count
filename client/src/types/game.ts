@@ -10,6 +10,7 @@ export interface Card {
 
 export interface Player {
   id: string;
+  playerToken: string;
   name: string;
   hand: Card[];
   roundScores: number[];

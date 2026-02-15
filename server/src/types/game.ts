@@ -9,7 +9,8 @@ export interface Card {
 }
 
 export interface Player {
-  id: string;
+  id: string;           // Current socket.id (changes on reconnect)
+  playerToken: string; // Persistent token for reconnection (survives refresh)
   name: string;
   hand: Card[];
   roundScores: number[]; // Score for each round

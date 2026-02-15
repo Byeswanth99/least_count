@@ -5,7 +5,27 @@ import { WaitingRoom } from './components/WaitingRoom';
 import { GameBoard } from './components/GameBoard';
 import { GameState, GameSettings, RoundEndData } from './types/game';
 
+const SESSION_KEY = 'least_count_session';
+
+type Session = { roomCode: string; playerToken: string; playerName: string };
 type AppState = 'lobby' | 'waitingRoom' | 'playing';
+
+// Use sessionStorage (per-tab) so multiple tabs keep separate game sessions
+function getSession(): Session | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as Session;
+  } catch {
+    return null;
+  }
+}
+function saveSession(s: Session) {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(s));
+}
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
+}
 
 function App() {
   const { socket, isConnected } = useSocket();
@@ -16,14 +36,36 @@ function App() {
   useEffect(() => {
     if (!socket) return;
 
-    // Listen for connect event to get socket.id
+    // Listen for connect event to get socket.id and optionally rejoin
     const handleConnect = () => {
       setPlayerId(socket.id || '');
+      const session = getSession();
+      if (session?.roomCode && session?.playerToken) {
+        socket.emit('rejoinRoom', { roomCode: session.roomCode, playerToken: session.playerToken }, (response: any) => {
+          if (response?.success && response.gameState) {
+            setGameState(response.gameState);
+            setAppState(response.gameState.gamePhase === 'lobby' ? 'waitingRoom' : 'playing');
+          } else {
+            clearSession();
+          }
+        });
+      }
     };
 
-    // If already connected, set immediately
+    // If already connected, set immediately and try rejoin
     if (socket.connected) {
       setPlayerId(socket.id || '');
+      const session = getSession();
+      if (session?.roomCode && session?.playerToken) {
+        socket.emit('rejoinRoom', { roomCode: session.roomCode, playerToken: session.playerToken }, (response: any) => {
+          if (response?.success && response.gameState) {
+            setGameState(response.gameState);
+            setAppState(response.gameState.gamePhase === 'lobby' ? 'waitingRoom' : 'playing');
+          } else {
+            clearSession();
+          }
+        });
+      }
     }
 
     socket.on('connect', handleConnect);
@@ -61,9 +103,9 @@ function App() {
       // Game state will be updated via gameStateUpdate event
     });
 
-    // Game ended
-    socket.on('gameEnded', (data) => {
-      console.log('Game ended:', data);
+    // Game ended – clear session so we don't attempt rejoin to a removed room
+    socket.on('gameEnded', () => {
+      clearSession();
     });
 
     // Turn timeout
@@ -76,6 +118,11 @@ function App() {
       console.log('Player disconnected:', data.playerId);
     });
 
+    // Player reconnected (e.g. after refresh) – update player list
+    socket.on('playerReconnected', (data: { players: GameState['players'] }) => {
+      setGameState(prev => prev ? { ...prev, players: data.players } : null);
+    });
+
     return () => {
       socket.off('connect', handleConnect);
       socket.off('playerJoined');
@@ -86,6 +133,7 @@ function App() {
       socket.off('gameEnded');
       socket.off('turnTimeout');
       socket.off('playerDisconnected');
+      socket.off('playerReconnected');
     };
   }, [socket]); // Removed gameState dependency to prevent re-registration
 
@@ -94,6 +142,7 @@ function App() {
 
     socket.emit('createRoom', { playerName, settings }, (response: any) => {
       if (response.success) {
+        if (response.playerToken) saveSession({ roomCode: response.roomCode, playerToken: response.playerToken, playerName });
         setGameState(response.gameState);
         setAppState('waitingRoom');
       } else {
@@ -107,6 +156,7 @@ function App() {
 
     socket.emit('joinRoom', { playerName, roomCode }, (response: any) => {
       if (response.success) {
+        if (response.playerToken) saveSession({ roomCode, playerToken: response.playerToken, playerName });
         setGameState(response.gameState);
         setAppState('waitingRoom');
       } else {
@@ -127,6 +177,7 @@ function App() {
 
   const handleLeaveRoom = () => {
     if (!socket) return;
+    clearSession();
     socket.emit('leaveRoom');
     setAppState('lobby');
     setGameState(null);

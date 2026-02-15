@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { GameState, Player, Card, GameSettings, Rank, RoundEndData, ShowResult } from '../types/game';
 import { Deck } from './Deck';
 
@@ -7,6 +8,7 @@ export class GameRoom {
   constructor(roomCode: string, hostId: string, hostName: string, settings: GameSettings) {
     const hostPlayer: Player = {
       id: hostId,
+      playerToken: randomUUID(),
       name: hostName,
       hand: [],
       roundScores: [],
@@ -53,6 +55,7 @@ export class GameRoom {
 
     const newPlayer: Player = {
       id: playerId,
+      playerToken: randomUUID(),
       name: playerName,
       hand: [],
       roundScores: [],
@@ -74,6 +77,21 @@ export class GameRoom {
       this.state.hostId = this.state.players[0].id;
       this.state.players[0].isHost = true;
     }
+  }
+
+  /** Rejoin with a new socket after refresh; updates player id and state references. Returns true if player found by token. */
+  rejoinPlayer(playerToken: string, newSocketId: string): boolean {
+    const player = this.state.players.find(p => p.playerToken === playerToken);
+    if (!player) return false;
+    const oldId = player.id;
+    player.id = newSocketId;
+    player.isConnected = true;
+    if (this.state.hostId === oldId) this.state.hostId = newSocketId;
+    if (this.state.currentTurnPlayerId === oldId) this.state.currentTurnPlayerId = newSocketId;
+    if (this.state.roundStartPlayerId === oldId) this.state.roundStartPlayerId = newSocketId;
+    const idx = this.state.playerOrder.indexOf(oldId);
+    if (idx !== -1) this.state.playerOrder[idx] = newSocketId;
+    return true;
   }
 
   startGame(): boolean {

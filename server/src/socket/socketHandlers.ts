@@ -247,8 +247,9 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
         const existingTimer = turnTimers.get(roomCode);
         if (existingTimer) {
           clearTimeout(existingTimer);
+          turnTimers.delete(roomCode);
         }
-        
+
         room.startNextRound();
 
         callback({ success: true });
@@ -359,25 +360,24 @@ function startTurnTimer(io: Server, roomCode: string, room: any) {
     clearTimeout(existingTimer);
   }
 
-  // Set new timer
+  // Set new timer (wrap in try/catch so one room's error cannot crash the server)
   const timer = setTimeout(() => {
-    const currentState = room.getState();
-    
-    // Only execute if still in playing phase
-    if (currentState.gamePhase !== 'playing') {
-      return;
-    }
-    
-    const timeoutResult = room.checkTurnTimeout();
-    if (timeoutResult) {
-      io.to(roomCode).emit('turnTimeout', timeoutResult);
-      io.to(roomCode).emit('gameStateUpdate', { gameState: room.getState() });
-      
-      // Only start next timer if game is still in playing phase
-      const afterState = room.getState();
-      if (afterState.gamePhase === 'playing') {
-        startTurnTimer(io, roomCode, room);
+    try {
+      const currentState = room.getState();
+      if (currentState.gamePhase !== 'playing') return;
+
+      const timeoutResult = room.checkTurnTimeout();
+      if (timeoutResult) {
+        io.to(roomCode).emit('turnTimeout', timeoutResult);
+        io.to(roomCode).emit('gameStateUpdate', { gameState: room.getState() });
+        const afterState = room.getState();
+        if (afterState.gamePhase === 'playing') {
+          startTurnTimer(io, roomCode, room);
+        }
       }
+    } catch (err) {
+      logger.error(`Turn timer error for room ${roomCode}:`, err);
+      turnTimers.delete(roomCode);
     }
   }, state.settings.timerDuration * 1000);
 

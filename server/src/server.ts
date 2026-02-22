@@ -67,6 +67,15 @@ setInterval(() => {
   logger.info(`📊 Active rooms: ${roomManager.getRoomCount()}, Connected clients: ${io.engine.clientsCount}`);
 }, CLEANUP_INTERVAL);
 
+// Prevent process crash on unhandled errors (e.g. after 3 rounds on Render)
+process.on('uncaughtException', (err) => {
+  logger.error(`Uncaught exception: ${err.message}`, err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error(`Unhandled rejection at ${promise}: ${reason}`);
+});
+
 const PORT = process.env.PORT || 3001;
 
 httpServer.listen(PORT, () => {

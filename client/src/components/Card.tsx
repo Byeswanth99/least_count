@@ -1,5 +1,5 @@
 import { Card as CardType, Rank } from '../types/game';
-import { getCardSymbol, getCardColor, formatCardRank, isWildCard } from '../utils/cardUtils';
+import { getCardSymbol, getCardColor, formatCardRank } from '../utils/cardUtils';
 
 interface CardProps {
   card: CardType;
@@ -7,12 +7,10 @@ interface CardProps {
   isSelected?: boolean;
   onClick?: () => void;
   size?: 'small' | 'medium' | 'large';
-  showWildIndicator?: boolean; // New prop to control wild card highlighting
+  showWildIndicator?: boolean; // Kept for API compatibility but no longer used (no wild highlighting)
 }
 
-export function Card({ card, wildCardRank, isSelected, onClick, size = 'medium', showWildIndicator = true }: CardProps) {
-  const isWild = isWildCard(card, wildCardRank);
-  
+export function Card({ card, wildCardRank, isSelected, onClick, size = 'medium' }: CardProps) {
   const sizeClasses = {
     small: 'w-12 h-16 text-xs',
     medium: 'w-16 h-24 text-sm',
@@ -27,16 +25,10 @@ export function Card({ card, wildCardRank, isSelected, onClick, size = 'medium',
         bg-white rounded-lg shadow-md border-2 
         ${isSelected ? 'border-blue-500 -translate-y-2' : 'border-gray-300'}
         ${onClick ? 'cursor-pointer hover:shadow-lg hover:-translate-y-1' : ''}
-        ${isWild && showWildIndicator ? 'ring-2 ring-yellow-400' : ''}
         transition-all duration-200 flex flex-col items-center justify-between p-2
         relative
       `}
     >
-      {isWild && showWildIndicator && (
-        <div className="absolute -top-1 -right-1 bg-yellow-400 text-yellow-900 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">
-          W
-        </div>
-      )}
       <div className={`font-bold ${getCardColor(card.suit)}`}>
         {formatCardRank(card.rank)}
       </div>

@@ -14,37 +14,46 @@ export function useSoundEffects() {
     return audioContextRef.current;
   }, []);
 
+  // Resume context if suspended (required by browser autoplay policy after user gesture)
+  const ensureContextRunning = useCallback((): Promise<void> => {
+    const ctx = getAudioContext();
+    return ctx.state === 'suspended' ? ctx.resume() : Promise.resolve();
+  }, [getAudioContext]);
+
   // Play a simple beep with specified frequency and duration
   const playBeep = useCallback((frequency: number, duration: number, volume: number = 0.3) => {
     if (!enabledRef.current) return;
 
-    try {
-      const ctx = getAudioContext();
-      const oscillator = ctx.createOscillator();
-      const gainNode = ctx.createGain();
+    ensureContextRunning().then(() => {
+      try {
+        const ctx = getAudioContext();
+        const oscillator = ctx.createOscillator();
+        const gainNode = ctx.createGain();
 
-      oscillator.connect(gainNode);
-      gainNode.connect(ctx.destination);
+        oscillator.connect(gainNode);
+        gainNode.connect(ctx.destination);
 
-      oscillator.frequency.value = frequency;
-      oscillator.type = 'sine';
+        oscillator.frequency.value = frequency;
+        oscillator.type = 'sine';
 
-      gainNode.gain.setValueAtTime(volume, ctx.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
+        gainNode.gain.setValueAtTime(volume, ctx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
 
-      oscillator.start(ctx.currentTime);
-      oscillator.stop(ctx.currentTime + duration);
-    } catch (error) {
-      console.warn('Sound effect failed:', error);
-    }
-  }, [getAudioContext]);
+        oscillator.start(ctx.currentTime);
+        oscillator.stop(ctx.currentTime + duration);
+      } catch (error) {
+        console.warn('Sound effect failed:', error);
+      }
+    });
+  }, [getAudioContext, ensureContextRunning]);
 
   // Play realistic card sound using white noise
   const playCardSound = useCallback((type: 'pick' | 'place') => {
     if (!enabledRef.current) return;
 
-    try {
-      const ctx = getAudioContext();
+    ensureContextRunning().then(() => {
+      try {
+        const ctx = getAudioContext();
       const bufferSize = ctx.sampleRate * 0.1; // 100ms
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const data = buffer.getChannelData(0);
@@ -78,10 +87,11 @@ export function useSoundEffects() {
 
       noise.start(ctx.currentTime);
       noise.stop(ctx.currentTime + 0.1);
-    } catch (error) {
-      console.warn('Sound effect failed:', error);
-    }
-  }, [getAudioContext]);
+      } catch (error) {
+        console.warn('Sound effect failed:', error);
+      }
+    });
+  }, [getAudioContext, ensureContextRunning]);
 
   const playSound = useCallback((type: SoundType) => {
     switch (type) {
@@ -128,6 +138,8 @@ export function useSoundEffects() {
     enable,
     disable,
     toggle,
-    isEnabled: () => enabledRef.current
+    isEnabled: () => enabledRef.current,
+    /** Call on first user interaction (e.g. sound button click) to unlock audio for this tab */
+    resumeContextIfNeeded: ensureContextRunning
   };
 }

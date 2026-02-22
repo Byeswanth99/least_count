@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { GameState } from '../types/game';
+import { useState, useEffect, useRef } from 'react';
+import { GameState, RoundEndData } from '../types/game';
 import { Card } from './Card';
 import { PlayerAvatar } from './PlayerAvatar';
 import { Scoreboard } from './Scoreboard';
@@ -9,6 +9,7 @@ import { useSoundEffects } from '../hooks/useSoundEffects';
 interface GameBoardProps {
   gameState: GameState;
   playerId: string;
+  lastRoundEndData?: RoundEndData | null;
   onDrawCard: (source: 'deck' | 'discard') => void;
   onDiscardCards: (cardIds: string[]) => void;
   onCallShow: () => void;
@@ -18,6 +19,7 @@ interface GameBoardProps {
 export function GameBoard({
   gameState,
   playerId,
+  lastRoundEndData = null,
   onDrawCard,
   onDiscardCards,
   onCallShow,
@@ -31,7 +33,8 @@ export function GameBoard({
   const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
   const [localCardOrder, setLocalCardOrder] = useState<string[]>([]); // Store card IDs in user's preferred order
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const { playSound } = useSoundEffects();
+  const { playSound, resumeContextIfNeeded } = useSoundEffects();
+  const prevTurnPlayerIdRef = useRef<string | null>(null);
 
   const currentPlayer = gameState.players.find(p => p.id === playerId);
   const isMyTurn = gameState.currentTurnPlayerId === playerId;
@@ -111,17 +114,20 @@ export function GameBoard({
     return () => clearInterval(interval);
   }, [isMyTurn, gameState.turnStartTime, gameState.settings.timerEnabled, gameState.settings.timerDuration, gameState.turnTimeLimit]);
 
-  // Reset discard state when turn changes and play notification sound
+  // Reset discard state when turn changes and play notification sound only when turn *transitions* to us
   useEffect(() => {
+    const currentTurnId = gameState.currentTurnPlayerId ?? null;
     if (isMyTurn) {
       setHasDiscarded(false);
       setSelectedCards([]);
-      // Play turn notification sound when it becomes your turn
-      if (soundEnabled) {
+      // Play sound only when turn just switched to us (not on initial mount when we're first player)
+      const justBecameMyTurn = prevTurnPlayerIdRef.current != null && prevTurnPlayerIdRef.current !== playerId && currentTurnId === playerId;
+      if (justBecameMyTurn && soundEnabled) {
         playSound('turnNotification');
       }
     }
-  }, [gameState.currentTurnPlayerId, isMyTurn, soundEnabled, playSound]);
+    prevTurnPlayerIdRef.current = currentTurnId;
+  }, [gameState.currentTurnPlayerId, isMyTurn, soundEnabled, playSound, playerId]);
 
   // Reset card order when round changes
   useEffect(() => {
@@ -131,7 +137,7 @@ export function GameBoard({
   const handleCardClick = (cardId: string) => {
     if (hasDiscarded || !isMyTurn) return;
 
-    // Play selection sound
+    resumeContextIfNeeded(); // Unlock audio on first interaction
     if (soundEnabled) {
       playSound('select');
     }
@@ -168,8 +174,8 @@ export function GameBoard({
 
   const handleDraw = (source: 'deck' | 'discard') => {
     if (!isMyTurn || !hasDiscarded) return;
-    
-    // Play draw sound
+
+    resumeContextIfNeeded();
     if (soundEnabled) {
       playSound('draw');
     }
@@ -269,28 +275,65 @@ export function GameBoard({
           )}
 
           <div className="mb-6">
-            <h3 className="font-semibold mb-3">Final Scores:</h3>
-            <div className="space-y-2">
-              {gameState.players
-                .slice()
-                .sort((a, b) => a.totalScore - b.totalScore)
-                .map((player, idx) => (
-                  <div
-                    key={player.id}
-                    className={`
-                      p-4 rounded-lg flex justify-between items-center
-                      ${idx === 0 && !player.isEliminated ? 'bg-green-100 border-2 border-green-500' : 'bg-gray-50'}
-                      ${player.isEliminated ? 'opacity-50' : ''}
-                    `}
-                  >
-                    <div className="flex items-center gap-2">
-                      {idx === 0 && !player.isEliminated && <span className="text-2xl">🏆</span>}
-                      <span className="font-semibold">{player.name}</span>
-                      {player.isEliminated && <span className="text-red-600 text-sm">(Eliminated)</span>}
-                    </div>
-                    <div className="text-xl font-bold">{player.totalScore} pts</div>
-                  </div>
-                ))}
+            <h3 className="font-semibold mb-3">
+              {gameState.gamePhase === 'gameEnd' ? 'Final Scores' : 'Round results'}
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-gray-100 border-b border-gray-300">
+                    <th className="px-4 py-2 text-left">Player</th>
+                    <th className="px-4 py-2 text-center">Round score</th>
+                    <th className="px-4 py-2 text-center">Total score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const roundScores = lastRoundEndData?.scores ?? gameState.players.map(p => ({
+                      playerId: p.id,
+                      playerName: p.name,
+                      handTotal: 0,
+                      roundScore: p.roundScores[p.roundScores.length - 1] ?? 0,
+                      totalScore: p.totalScore,
+                      isEliminated: p.isEliminated
+                    }));
+                    const whoShowed = lastRoundEndData?.showResult?.playerId;
+                    const roundWinnerId = roundScores.length
+                      ? roundScores.reduce((low, p) => (p.roundScore < low.roundScore ? p : low)).playerId
+                      : null;
+                    return roundScores
+                      .slice()
+                      .sort((a, b) => a.totalScore - b.totalScore)
+                      .map((row) => {
+                        const isWinner = row.playerId === roundWinnerId;
+                        const isLoser = !isWinner && !row.isEliminated;
+                        return (
+                          <tr
+                            key={row.playerId}
+                            className={`
+                              border-b border-gray-200
+                              ${isWinner ? 'bg-green-100 border-l-4 border-l-green-500' : ''}
+                              ${isLoser ? 'bg-red-50 border-l-4 border-l-red-500' : ''}
+                              ${row.isEliminated ? 'opacity-60' : ''}
+                              ${!isWinner && !isLoser ? 'bg-gray-50' : ''}
+                            `}
+                          >
+                            <td className="px-4 py-3 font-semibold">
+                              {isWinner && '🏆 '}
+                              {row.playerName}
+                              {whoShowed === row.playerId && (
+                                <span className="ml-2 text-xs font-normal text-blue-600">(called show)</span>
+                              )}
+                              {row.isEliminated && ' ❌'}
+                            </td>
+                            <td className="px-4 py-3 text-center font-bold">{row.roundScore}</td>
+                            <td className="px-4 py-3 text-center font-bold">{row.totalScore}</td>
+                          </tr>
+                        );
+                      });
+                  })()}
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -337,7 +380,10 @@ export function GameBoard({
 
         <div className="flex gap-2">
           <button
-            onClick={() => setSoundEnabled(!soundEnabled)}
+            onClick={() => {
+              resumeContextIfNeeded(); // Unlock audio on first interaction (browser autoplay policy)
+              setSoundEnabled(!soundEnabled);
+            }}
             className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-2 py-1 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-base font-semibold transition-all"
             title={soundEnabled ? "Mute sounds" : "Enable sounds"}
           >
@@ -370,28 +416,8 @@ export function GameBoard({
         ))}
       </div>
 
-      {/* Center Area - Deck, Wild Card, and Two Discard Piles */}
+      {/* Center Area - Deck and Discard Piles (no wild card display) */}
       <div className="absolute top-[35%] sm:top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex items-center gap-1 sm:gap-4 scale-75 sm:scale-100">
-        {/* Wild Card Display */}
-        {gameState.wildCardRank && (
-          <div className="flex flex-col items-center gap-1 sm:gap-2">
-            <div className="text-[10px] sm:text-xs font-bold text-gray-700 bg-yellow-300 px-1 sm:px-2 py-0.5 sm:py-1 rounded whitespace-nowrap">WILD</div>
-            <div className="transform scale-75 sm:scale-90">
-              <Card
-                card={{
-                  rank: gameState.wildCardRank,
-                  suit: 'hearts',
-                  value: 0,
-                  id: 'wild-display'
-                }}
-                wildCardRank={gameState.wildCardRank}
-                size="medium"
-                showWildIndicator={true}
-              />
-            </div>
-          </div>
-        )}
-
         {/* Deck */}
         <div
           onClick={() => handleDraw('deck')}
@@ -427,7 +453,6 @@ export function GameBoard({
                 card={gameState.discardPile[gameState.discardPile.length - 1]}
                 wildCardRank={gameState.wildCardRank}
                 size="medium"
-                showWildIndicator={true}
               />
             ) : (
               <div className="w-full h-full bg-gray-300 rounded-lg border-2 sm:border-4 border-dashed border-gray-400 flex items-center justify-center text-gray-500 text-[10px] sm:text-xs text-center">
@@ -446,7 +471,6 @@ export function GameBoard({
                 card={gameState.currentTurnDiscardPile[gameState.currentTurnDiscardPile.length - 1]}
                 wildCardRank={gameState.wildCardRank}
                 size="medium"
-                showWildIndicator={true}
               />
               <div className="absolute -top-1 -right-1 bg-orange-500 text-white rounded-full w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center text-[10px] sm:text-xs font-bold">
                 {gameState.currentTurnDiscardPile.length}
@@ -509,7 +533,6 @@ export function GameBoard({
                     isSelected={selectedCards.includes(card.id)}
                     onClick={() => handleCardClick(card.id)}
                     size="large"
-                    showWildIndicator={false}
                   />
                 </div>
               ))}

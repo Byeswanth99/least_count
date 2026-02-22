@@ -32,6 +32,7 @@ function App() {
   const [appState, setAppState] = useState<AppState>('lobby');
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [playerId, setPlayerId] = useState<string>('');
+  const [lastRoundEndData, setLastRoundEndData] = useState<RoundEndData | null>(null);
 
   useEffect(() => {
     if (!socket) return;
@@ -47,6 +48,8 @@ function App() {
             setAppState(response.gameState.gamePhase === 'lobby' ? 'waitingRoom' : 'playing');
           } else {
             clearSession();
+            setGameState(null);
+            setAppState('lobby');
           }
         });
       }
@@ -63,6 +66,8 @@ function App() {
             setAppState(response.gameState.gamePhase === 'lobby' ? 'waitingRoom' : 'playing');
           } else {
             clearSession();
+            setGameState(null);
+            setAppState('lobby');
           }
         });
       }
@@ -95,12 +100,16 @@ function App() {
     // Game state update
     socket.on('gameStateUpdate', (data) => {
       setGameState(data.gameState);
+      // Clear round-end snapshot when moving to next round
+      if (data.gameState?.gamePhase === 'playing') {
+        setLastRoundEndData(null);
+      }
     });
 
-    // Round ended
+    // Round ended – keep snapshot for the round-complete scorecard
     socket.on('roundEnded', (data: RoundEndData) => {
       console.log('Round ended:', data);
-      // Game state will be updated via gameStateUpdate event
+      setLastRoundEndData(data);
     });
 
     // Game ended – clear session so we don't attempt rejoin to a removed room
@@ -258,6 +267,7 @@ function App() {
       <GameBoard
         gameState={gameState}
         playerId={playerId}
+        lastRoundEndData={lastRoundEndData}
         onDrawCard={handleDrawCard}
         onDiscardCards={handleDiscardCards}
         onCallShow={handleCallShow}

@@ -10,10 +10,10 @@ export function Lobby({ onCreateRoom, onJoinRoom }: LobbyProps) {
   const [mode, setMode] = useState<'menu' | 'create' | 'join'>('menu');
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
-  const [endConditionType, setEndConditionType] = useState<EndConditionType>('pointLimit');
+  const [endConditionType, setEndConditionType] = useState<EndConditionType>('roundLimit');
   const [pointLimit, setPointLimit] = useState(200);
   const [roundLimit, setRoundLimit] = useState(5);
-  const [timerEnabled, setTimerEnabled] = useState(true);
+  const [timerEnabled, setTimerEnabled] = useState(false);
   const [timerDuration, setTimerDuration] = useState(30);
 
   const handleCreateRoom = () => {

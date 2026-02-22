@@ -14,6 +14,7 @@ interface GameBoardProps {
   onDiscardCards: (cardIds: string[]) => void;
   onCallShow: () => void;
   onStartNextRound: () => void;
+  onEndGameByHost?: () => void;
 }
 
 export function GameBoard({
@@ -23,7 +24,8 @@ export function GameBoard({
   onDrawCard,
   onDiscardCards,
   onCallShow,
-  onStartNextRound
+  onStartNextRound,
+  onEndGameByHost
 }: GameBoardProps) {
   const [selectedCards, setSelectedCards] = useState<string[]>([]);
   const [showScoreboard, setShowScoreboard] = useState(false);
@@ -237,28 +239,15 @@ export function GameBoard({
     setDragOverCardId(null);
   };
 
-  // Position other players at top in a horizontal/curved arrangement
-  const getPlayerPosition = (index: number, total: number) => {
-    if (total <= 3) {
-      // Simple horizontal layout for 3 or fewer - adjusted for mobile
-      const spacing = Math.min(28, 75 / total);
-      const startLeft = 50 - (spacing * (total - 1)) / 2;
-      return { top: '12%', left: `${startLeft + index * spacing}%` };
-    }
-    // Curved arrangement for more players - tighter on mobile
-    const angle = (index / (total - 1)) * Math.PI - Math.PI / 2;
-    const radius = window.innerWidth < 640 ? 30 : 35; // Smaller radius on mobile
-    const centerX = 50;
-    const centerY = window.innerWidth < 640 ? 18 : 30; // Higher on mobile
-    const x = centerX + radius * Math.cos(angle);
-    const y = centerY + radius * Math.sin(angle);
-    return { top: `${Math.max(8, y)}%`, left: `${x}%` };
-  };
+  // Slot layout: top row 5 (turn order 1–5), left 2 (6–7), right 2 (8–9); order is anti-clockwise round-robin
+  const topRowPlayers = otherPlayers.slice(0, 5);
+  const leftColPlayers = otherPlayers.slice(5, 7);
+  const rightColPlayers = otherPlayers.slice(7, 9);
 
   if (gameState.gamePhase === 'roundEnd' || gameState.gamePhase === 'gameEnd') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full">
+      <div className="min-h-screen bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center p-2 sm:p-4">
+        <div className="bg-white rounded-2xl shadow-2xl p-4 sm:p-8 max-w-2xl w-full max-h-[95vh] overflow-y-auto">
           <h2 className="text-3xl font-bold text-center mb-6">
             {gameState.gamePhase === 'gameEnd' ? '🏆 Game Over!' : '🎯 Round Over!'}
           </h2>
@@ -379,6 +368,19 @@ export function GameBoard({
         )}
 
         <div className="flex gap-2">
+          {gameState.hostId === playerId && onEndGameByHost && (
+            <button
+              onClick={() => {
+                if (window.confirm('End game for everyone? All players will return to the lobby.')) {
+                  onEndGameByHost();
+                }
+              }}
+              className="bg-red-500/90 hover:bg-red-600 text-white px-2 py-1 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-base font-semibold transition-all"
+              title="End game for everyone"
+            >
+              🚪 <span className="hidden sm:inline">Exit game</span>
+            </button>
+          )}
           <button
             onClick={() => {
               resumeContextIfNeeded(); // Unlock audio on first interaction (browser autoplay policy)
@@ -398,86 +400,139 @@ export function GameBoard({
         </div>
       </div>
 
-      {/* Other Players (Top Layout) - Shows in anti-clockwise order from your perspective */}
-      <div className="absolute inset-0 pointer-events-none">
-        {otherPlayers.map((player, index) => (
-          <div
-            key={player.id}
-            className="absolute pointer-events-auto"
-            style={getPlayerPosition(index, otherPlayers.length)}
-          >
-            <PlayerAvatar
-              player={player}
-              isCurrentTurn={gameState.currentTurnPlayerId === player.id}
-              isYou={false}
-              cardCount={player.hand.length}
-            />
-          </div>
-        ))}
-      </div>
-
-      {/* Center Area - Deck and Discard Piles (no wild card display) */}
-      <div className="absolute top-[35%] sm:top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex items-center gap-1 sm:gap-4 scale-75 sm:scale-100">
-        {/* Deck */}
-        <div
-          onClick={() => handleDraw('deck')}
-          className={`
-            relative w-16 h-24 sm:w-24 sm:h-32 bg-blue-900 rounded-lg border-2 sm:border-4 border-white shadow-2xl
-            flex items-center justify-center text-white font-bold text-base sm:text-xl
-            ${isMyTurn && hasDiscarded ? 'cursor-pointer hover:scale-110 hover:shadow-blue-500/50' : 'opacity-60'}
-            transition-all duration-200
-          `}
-        >
-          <div className="text-center">
-            <div className="text-3xl mb-1">🎴</div>
-            <div className="text-sm">{gameState.deck.length}</div>
-          </div>
+      {/* Board: top row (dynamic slots) + middle (left only if 5+ | center | right only if 7+) */}
+      <div className="absolute inset-0 pt-20 sm:pt-24 pb-2 flex flex-col">
+        {/* Top row: up to 5 players in anti-clockwise turn order (no empty placeholders) */}
+        <div className="flex justify-center gap-1 sm:gap-2 px-1 sm:px-2 shrink-0 min-h-[72px] sm:min-h-[80px]">
+          {topRowPlayers.map((player) => (
+            <div key={player.id} className="flex-1 min-w-0 max-w-[100px] sm:max-w-[120px] flex justify-center items-center">
+              <PlayerAvatar
+                player={player}
+                isCurrentTurn={gameState.currentTurnPlayerId === player.id}
+                isYou={false}
+                cardCount={player.hand.length}
+                compact={otherPlayers.length > 5}
+                extraCompact={otherPlayers.length > 7}
+              />
+            </div>
+          ))}
         </div>
 
-        {/* Arrow */}
-        <div className="text-gray-700 text-2xl sm:text-4xl font-bold">→</div>
+        {/* Middle: left 2 (when 6+ players) | center (deck + turn) | right 2 (when 8+ players); all in turn order */}
+        <div className="flex items-start justify-center gap-2 sm:gap-4 px-2 pt-8 sm:pt-12 flex-1 min-h-0">
+          {/* Left column: 2 slots when we have 6+ other players (players 6–7 in anti-clockwise order) */}
+          {leftColPlayers.length > 0 && (
+            <div className="flex flex-col justify-center gap-2 sm:gap-4 w-14 sm:w-20 shrink-0">
+              {leftColPlayers.map((player) => (
+                <div key={player.id} className="flex justify-center">
+                  <PlayerAvatar
+                    player={player}
+                    isCurrentTurn={gameState.currentTurnPlayerId === player.id}
+                    isYou={false}
+                    cardCount={player.hand.length}
+                    compact
+                    extraCompact={otherPlayers.length > 7}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
 
-        {/* Main Discard Pile (can draw from) */}
-        <div className="flex flex-col items-center gap-0.5 sm:gap-1">
-          <div className="text-[10px] sm:text-xs font-semibold text-green-700 whitespace-nowrap">Draw Pile</div>
-          <div
-            onClick={() => handleDraw('discard')}
-            className={`
-              relative w-16 h-24 sm:w-24 sm:h-32
-              ${isMyTurn && hasDiscarded && gameState.discardPile.length > 0 ? 'cursor-pointer hover:scale-110 ring-2 ring-green-500' : 'opacity-90'}
-              transition-all duration-200
-            `}
-          >
-            {gameState.discardPile.length > 0 ? (
-              <Card
-                card={gameState.discardPile[gameState.discardPile.length - 1]}
-                wildCardRank={gameState.wildCardRank}
-                size="medium"
-              />
-            ) : (
-              <div className="w-full h-full bg-gray-300 rounded-lg border-2 sm:border-4 border-dashed border-gray-400 flex items-center justify-center text-gray-500 text-[10px] sm:text-xs text-center">
-                Empty
+          {/* Center: Wild | Deck | Draw + turn message — sits right below top row, no big gap */}
+          <div className="flex-1 min-w-0 flex flex-col items-center justify-start gap-2 sm:gap-3 max-w-lg">
+            <div className="flex items-center justify-center gap-1 sm:gap-4 scale-75 sm:scale-100 shrink-0">
+              {gameState.wildCardRank && (
+                <div className="flex flex-col items-center gap-0.5 sm:gap-1">
+                  <div className="text-[10px] sm:text-xs font-semibold text-gray-600 whitespace-nowrap">Wild</div>
+                  <div className="transform scale-75 sm:scale-90">
+                    <Card
+                      card={{ rank: gameState.wildCardRank, suit: 'hearts', value: 0, id: 'wild-display' }}
+                      wildCardRank={gameState.wildCardRank}
+                      size="medium"
+                    />
+                  </div>
+                </div>
+              )}
+              <div
+                onClick={() => handleDraw('deck')}
+                className={`
+                  relative w-16 h-24 sm:w-24 sm:h-32 bg-blue-900 rounded-lg border-2 sm:border-4 border-white shadow-2xl
+                  flex items-center justify-center text-white font-bold text-base sm:text-xl
+                  ${isMyTurn && hasDiscarded ? 'cursor-pointer hover:scale-110 hover:shadow-blue-500/50' : 'opacity-60'}
+                  transition-all duration-200
+                `}
+              >
+                <div className="text-center">
+                  <div className="text-3xl mb-1">🎴</div>
+                  <div className="text-sm">{gameState.deck.length}</div>
+                </div>
+              </div>
+              <div className="text-gray-700 text-2xl sm:text-4xl font-bold">→</div>
+              <div className="flex flex-col items-center gap-0.5 sm:gap-1">
+                <div className="text-[10px] sm:text-xs font-semibold text-green-700 whitespace-nowrap">Draw Pile</div>
+                <div
+                  onClick={() => handleDraw('discard')}
+                  className={`
+                    relative w-16 h-24 sm:w-24 sm:h-32
+                    ${isMyTurn && hasDiscarded && gameState.discardPile.length > 0 ? 'cursor-pointer hover:scale-110 ring-2 ring-green-500' : 'opacity-90'}
+                    transition-all duration-200
+                  `}
+                >
+                  {gameState.discardPile.length > 0 ? (
+                    <Card card={gameState.discardPile[gameState.discardPile.length - 1]} wildCardRank={gameState.wildCardRank} size="medium" />
+                  ) : (
+                    <div className="w-full h-full bg-gray-300 rounded-lg border-2 sm:border-4 border-dashed border-gray-400 flex items-center justify-center text-gray-500 text-[10px] sm:text-xs text-center">Empty</div>
+                  )}
+                </div>
+              </div>
+              {gameState.currentTurnDiscardPile.length > 0 && (
+                <div className="flex flex-col items-center gap-0.5 sm:gap-1">
+                  <div className="text-[10px] sm:text-xs font-semibold text-orange-700 whitespace-nowrap">Just Discarded</div>
+                  <div className="relative w-16 h-24 sm:w-24 sm:h-32 opacity-75">
+                    <Card card={gameState.currentTurnDiscardPile[gameState.currentTurnDiscardPile.length - 1]} wildCardRank={gameState.wildCardRank} size="medium" />
+                    <div className="absolute -top-1 -right-1 bg-orange-500 text-white rounded-full w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center text-[10px] sm:text-xs font-bold">
+                      {gameState.currentTurnDiscardPile.length}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* Turn / action message only when it's your turn */}
+            {isMyTurn && (
+              <div className="w-full max-w-md rounded-lg bg-blue-100/90 border border-blue-200 px-3 py-2 text-center">
+                {hasDiscarded ? (
+                  canSkipDraw ? (
+                    <span className="text-green-700 text-sm font-semibold">✅ Matching discard — turn passed</span>
+                  ) : (
+                    <span className="text-purple-700 text-sm font-semibold">👉 Draw from deck or discard pile</span>
+                  )
+                ) : handValue <= 10 ? (
+                  <span className="text-green-700 text-sm font-semibold">🎯 Your turn — discard, or call SHOW (hand ≤ 10)</span>
+                ) : (
+                  <span className="text-blue-700 text-sm font-semibold">👉 Your turn — select cards and discard</span>
+                )}
               </div>
             )}
           </div>
-        </div>
 
-        {/* Current Turn Discard Pile (just discarded - cannot draw yet) */}
-        {gameState.currentTurnDiscardPile.length > 0 && (
-          <div className="flex flex-col items-center gap-0.5 sm:gap-1">
-            <div className="text-[10px] sm:text-xs font-semibold text-orange-700 whitespace-nowrap">Just Discarded</div>
-            <div className="relative w-16 h-24 sm:w-24 sm:h-32 opacity-75">
-              <Card
-                card={gameState.currentTurnDiscardPile[gameState.currentTurnDiscardPile.length - 1]}
-                wildCardRank={gameState.wildCardRank}
-                size="medium"
-              />
-              <div className="absolute -top-1 -right-1 bg-orange-500 text-white rounded-full w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center text-[10px] sm:text-xs font-bold">
-                {gameState.currentTurnDiscardPile.length}
-              </div>
+          {/* Right column: 2 slots when we have 8+ other players (players 8–9 in anti-clockwise order) */}
+          {rightColPlayers.length > 0 && (
+            <div className="flex flex-col justify-center gap-2 sm:gap-4 w-14 sm:w-20 shrink-0">
+              {rightColPlayers.map((player) => (
+                <div key={player.id} className="flex justify-center">
+                  <PlayerAvatar
+                    player={player}
+                    isCurrentTurn={gameState.currentTurnPlayerId === player.id}
+                    isYou={false}
+                    cardCount={player.hand.length}
+                    compact
+                    extraCompact
+                  />
+                </div>
+              ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Current Player (Bottom) */}
@@ -580,7 +635,7 @@ export function GameBoard({
                 `}
               >
                 <span className="hidden sm:inline">Draw from Discard</span>
-                <span className="sm:hidden">Discard</span>
+                <span className="sm:hidden">Draw discard</span>
               </button>
 
               <button
@@ -598,12 +653,6 @@ export function GameBoard({
               </button>
             </div>
 
-            {!isMyTurn && (
-              <div className="text-center mt-1 sm:mt-2 text-gray-700 text-[10px] sm:text-xs font-semibold">
-                Waiting for {gameState.players.find(p => p.id === gameState.currentTurnPlayerId)?.name}'s turn...
-              </div>
-            )}
-            
             {isMyTurn && !hasDiscarded && handValue > 10 && (
               <div className="text-center mt-1 sm:mt-2 text-blue-700 text-[10px] sm:text-xs font-semibold">
                 👉 Select and discard card(s) first

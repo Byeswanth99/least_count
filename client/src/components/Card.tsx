@@ -10,7 +10,7 @@ interface CardProps {
   showWildIndicator?: boolean; // Kept for API compatibility but no longer used (no wild highlighting)
 }
 
-export function Card({ card, wildCardRank, isSelected, onClick, size = 'medium' }: CardProps) {
+export function Card({ card, wildCardRank: _wildCardRank, isSelected, onClick, size = 'medium' }: CardProps) {
   const sizeClasses = {
     small: 'w-12 h-16 text-xs',
     medium: 'w-16 h-24 text-sm',

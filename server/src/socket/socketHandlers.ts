@@ -265,6 +265,29 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
       }
     });
 
+    // Host ends game for everyone (cleans room, all return to lobby)
+    socket.on('endGameByHost', (callback) => {
+      try {
+        const result = roomManager.getRoomByPlayerId(socket.id);
+        if (!result) {
+          callback?.({ success: false, error: 'Not in a room' });
+          return;
+        }
+        const { roomCode, room } = result;
+        const state = room.getState();
+        if (state.hostId !== socket.id) {
+          callback?.({ success: false, error: 'Only host can end the game' });
+          return;
+        }
+        io.to(roomCode).emit('gameEndedByHost');
+        cleanupRoom(roomCode, roomManager);
+        logger.cleanup(`Host ended game in room ${roomCode}`);
+        callback?.({ success: true });
+      } catch (error) {
+        callback?.({ success: false, error: 'Failed to end game' });
+      }
+    });
+
     // Leave Room
     socket.on('leaveRoom', () => {
       handlePlayerDisconnect(socket.id, io, roomManager);

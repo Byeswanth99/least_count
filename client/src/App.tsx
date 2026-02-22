@@ -37,40 +37,39 @@ function App() {
   useEffect(() => {
     if (!socket) return;
 
-    // Listen for connect event to get socket.id and optionally rejoin
-    const handleConnect = () => {
-      setPlayerId(socket.id || '');
+    const tryRejoin = () => {
       const session = getSession();
-      if (session?.roomCode && session?.playerToken) {
-        socket.emit('rejoinRoom', { roomCode: session.roomCode, playerToken: session.playerToken }, (response: any) => {
-          if (response?.success && response.gameState) {
-            setGameState(response.gameState);
-            setAppState(response.gameState.gamePhase === 'lobby' ? 'waitingRoom' : 'playing');
-          } else {
-            clearSession();
-            setGameState(null);
-            setAppState('lobby');
-          }
-        });
-      }
+      if (!session?.roomCode || !session?.playerToken) return;
+      let settled = false;
+      const settle = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (ok) return;
+        clearSession();
+        setGameState(null);
+        setAppState('lobby');
+      };
+      const timer = setTimeout(() => settle(false), 120000); // 2 min timeout so we don't stay stuck if server never responds
+      socket.emit('rejoinRoom', { roomCode: session.roomCode, playerToken: session.playerToken }, (response: any) => {
+        if (response?.success && response?.gameState) {
+          settle(true);
+          setGameState(response.gameState);
+          setAppState(response.gameState.gamePhase === 'lobby' ? 'waitingRoom' : 'playing');
+        } else {
+          settle(false);
+        }
+      });
     };
 
-    // If already connected, set immediately and try rejoin
+    const handleConnect = () => {
+      setPlayerId(socket.id || '');
+      tryRejoin();
+    };
+
     if (socket.connected) {
       setPlayerId(socket.id || '');
-      const session = getSession();
-      if (session?.roomCode && session?.playerToken) {
-        socket.emit('rejoinRoom', { roomCode: session.roomCode, playerToken: session.playerToken }, (response: any) => {
-          if (response?.success && response.gameState) {
-            setGameState(response.gameState);
-            setAppState(response.gameState.gamePhase === 'lobby' ? 'waitingRoom' : 'playing');
-          } else {
-            clearSession();
-            setGameState(null);
-            setAppState('lobby');
-          }
-        });
-      }
+      tryRejoin();
     }
 
     socket.on('connect', handleConnect);
@@ -117,6 +116,13 @@ function App() {
       clearSession();
     });
 
+    // Host ended game – return everyone to lobby and clear data
+    socket.on('gameEndedByHost', () => {
+      clearSession();
+      setGameState(null);
+      setAppState('lobby');
+    });
+
     // Turn timeout
     socket.on('turnTimeout', (data) => {
       console.log('Turn timeout for:', data.playerName);
@@ -140,6 +146,7 @@ function App() {
       socket.off('gameStateUpdate');
       socket.off('roundEnded');
       socket.off('gameEnded');
+      socket.off('gameEndedByHost');
       socket.off('turnTimeout');
       socket.off('playerDisconnected');
       socket.off('playerReconnected');
@@ -233,6 +240,19 @@ function App() {
     });
   };
 
+  const handleEndGameByHost = () => {
+    if (!socket) return;
+    socket.emit('endGameByHost', (response: any) => {
+      if (response?.success) {
+        clearSession();
+        setGameState(null);
+        setAppState('lobby');
+      } else if (response?.error) {
+        alert(response.error);
+      }
+    });
+  };
+
   if (!isConnected) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center">
@@ -272,6 +292,7 @@ function App() {
         onDiscardCards={handleDiscardCards}
         onCallShow={handleCallShow}
         onStartNextRound={handleStartNextRound}
+        onEndGameByHost={handleEndGameByHost}
       />
     );
   }

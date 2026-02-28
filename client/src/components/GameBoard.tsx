@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { GameState, RoundEndData } from '../types/game';
 import { Card } from './Card';
 import { PlayerAvatar } from './PlayerAvatar';
@@ -124,8 +124,9 @@ export function GameBoard({
       setSelectedCards([]);
       // Play sound only when turn just switched to us (not on initial mount when we're first player)
       const justBecameMyTurn = prevTurnPlayerIdRef.current != null && prevTurnPlayerIdRef.current !== playerId && currentTurnId === playerId;
-      if (justBecameMyTurn && soundEnabled) {
-        playSound('turnNotification');
+      if (justBecameMyTurn) {
+        if (soundEnabled) playSound('turnNotification');
+        if (navigator.vibrate) navigator.vibrate(200);
       }
     }
     prevTurnPlayerIdRef.current = currentTurnId;
@@ -203,84 +204,115 @@ export function GameBoard({
     onCallShow();
   };
 
-  // Drag and drop handlers (desktop)
-  const handleDragStart = (cardId: string) => {
-    setDraggedCardId(cardId);
-  };
+  // Unified card reorder — works via mouse (desktop) and touch (mobile)
+  const dragRef = useRef<{ cardId: string; moved: boolean } | null>(null);
+  const dragStateRef = useRef({ draggedCardId: null as string | null, dragOverCardId: null as string | null });
+  const ghostRef = useRef<HTMLDivElement | null>(null);
 
-  const handleDragOver = (e: React.DragEvent, cardId: string) => {
-    e.preventDefault();
-    setDragOverCardId(cardId);
-  };
-
-  const handleDrop = (e: React.DragEvent, targetCardId: string) => {
-    e.preventDefault();
-    if (!draggedCardId || !currentPlayer) return;
-
-    const draggedIndex = orderedHand.findIndex(c => c.id === draggedCardId);
-    const targetIndex = orderedHand.findIndex(c => c.id === targetCardId);
-
-    if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return;
-
-    const newOrder = orderedHand.map(c => c.id);
-    const [draggedCardId_] = newOrder.splice(draggedIndex, 1);
-    newOrder.splice(targetIndex, 0, draggedCardId_);
-    
-    setLocalCardOrder(newOrder);
-    
-    setDraggedCardId(null);
-    setDragOverCardId(null);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedCardId(null);
-    setDragOverCardId(null);
-  };
-
-  // Touch handlers for iOS / mobile reordering
-  const touchDragRef = useRef<{ cardId: string; moved: boolean } | null>(null);
-
-  const handleTouchStart = (cardId: string) => {
-    touchDragRef.current = { cardId, moved: false };
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!touchDragRef.current) return;
-
-    const touch = e.touches[0];
-    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const findCardUnderPoint = useCallback((x: number, y: number): string | null => {
+    if (!dragRef.current) return null;
+    const srcEl = document.querySelector(`[data-card-id="${dragRef.current.cardId}"]`) as HTMLElement | null;
+    if (srcEl) srcEl.style.visibility = 'hidden';
+    const el = document.elementFromPoint(x, y);
+    if (srcEl) srcEl.style.visibility = '';
     const cardEl = el?.closest('[data-card-id]') as HTMLElement | null;
+    return cardEl?.getAttribute('data-card-id') ?? null;
+  }, []);
 
-    if (!cardEl) return;
+  const updateGhost = useCallback((x: number, y: number) => {
+    if (!ghostRef.current) return;
+    ghostRef.current.style.transform = `translate(${x}px, ${y}px) translate(-50%, -60%)`;
+  }, []);
 
-    const targetCardId = cardEl.getAttribute('data-card-id');
-    if (targetCardId && targetCardId !== touchDragRef.current.cardId) {
-      if (!touchDragRef.current.moved) {
-        touchDragRef.current.moved = true;
-        setDraggedCardId(touchDragRef.current.cardId);
-      }
-      setDragOverCardId(targetCardId);
+  const showGhost = useCallback((cardId: string, x: number, y: number) => {
+    const srcEl = document.querySelector(`[data-card-id="${cardId}"]`) as HTMLElement | null;
+    if (!srcEl || ghostRef.current) return;
+    const clone = srcEl.cloneNode(true) as HTMLDivElement;
+    clone.style.position = 'fixed';
+    clone.style.left = '0';
+    clone.style.top = '0';
+    clone.style.transform = `translate(${x}px, ${y}px) translate(-50%, -60%)`;
+    clone.style.zIndex = '9999';
+    clone.style.pointerEvents = 'none';
+    clone.style.opacity = '0.85';
+    clone.style.filter = 'drop-shadow(0 8px 16px rgba(0,0,0,0.3))';
+    clone.style.transition = 'none';
+    clone.removeAttribute('data-card-id');
+    document.body.appendChild(clone);
+    ghostRef.current = clone;
+  }, []);
+
+  const removeGhost = useCallback(() => {
+    if (ghostRef.current) {
+      ghostRef.current.remove();
+      ghostRef.current = null;
     }
-  };
+  }, []);
 
-  const handleTouchEnd = () => {
-    if (touchDragRef.current?.moved && dragOverCardId && currentPlayer) {
-      const srcId = touchDragRef.current.cardId;
-      const draggedIndex = orderedHand.findIndex(c => c.id === srcId);
-      const targetIndex = orderedHand.findIndex(c => c.id === dragOverCardId);
+  const handlePointerMove = useCallback((x: number, y: number) => {
+    if (!dragRef.current) return;
 
-      if (draggedIndex !== -1 && targetIndex !== -1 && draggedIndex !== targetIndex) {
-        const newOrder = orderedHand.map(c => c.id);
-        const [removed] = newOrder.splice(draggedIndex, 1);
-        newOrder.splice(targetIndex, 0, removed);
+    if (!dragRef.current.moved) {
+      dragRef.current.moved = true;
+      setDraggedCardId(dragRef.current.cardId);
+      showGhost(dragRef.current.cardId, x, y);
+    }
+
+    updateGhost(x, y);
+
+    const targetId = findCardUnderPoint(x, y);
+    if (targetId && targetId !== dragRef.current.cardId) {
+      setDragOverCardId(targetId);
+      dragStateRef.current.dragOverCardId = targetId;
+    }
+  }, [findCardUnderPoint, showGhost, updateGhost]);
+
+  const finishDrag = useCallback(() => {
+    const ref = dragRef.current;
+    const overCardId = dragStateRef.current.dragOverCardId;
+    if (ref?.moved && overCardId && currentPlayer) {
+      const hand = orderedHand;
+      const srcIdx = hand.findIndex(c => c.id === ref.cardId);
+      const tgtIdx = hand.findIndex(c => c.id === overCardId);
+      if (srcIdx !== -1 && tgtIdx !== -1 && srcIdx !== tgtIdx) {
+        const newOrder = hand.map(c => c.id);
+        const [removed] = newOrder.splice(srcIdx, 1);
+        newOrder.splice(tgtIdx, 0, removed);
         setLocalCardOrder(newOrder);
       }
     }
-
-    touchDragRef.current = null;
+    removeGhost();
+    dragRef.current = null;
+    dragStateRef.current = { draggedCardId: null, dragOverCardId: null };
     setDraggedCardId(null);
     setDragOverCardId(null);
-  };
+  }, [currentPlayer, orderedHand, setLocalCardOrder, removeGhost]);
+
+  const handleCardPointerDown = useCallback((cardId: string) => {
+    dragRef.current = { cardId, moved: false };
+    dragStateRef.current.draggedCardId = cardId;
+  }, []);
+
+  // Global mouse listeners for desktop drag
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => handlePointerMove(e.clientX, e.clientY);
+    const onMouseUp = () => { if (dragRef.current) finishDrag(); };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [handlePointerMove, finishDrag]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!dragRef.current) return;
+    handlePointerMove(e.touches[0].clientX, e.touches[0].clientY);
+  }, [handlePointerMove]);
+
+  const handleTouchEnd = useCallback(() => {
+    if (dragRef.current) finishDrag();
+  }, [finishDrag]);
 
   // Slot layout: top row 5 (turn order 1–5), left 2 (6–7), right 2 (8–9); order is anti-clockwise round-robin
   const topRowPlayers = otherPlayers.slice(0, 5);
@@ -395,7 +427,7 @@ export function GameBoard({
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 flex flex-col">
+    <div className="h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-purple-600 shadow-lg p-2 sm:p-4 flex justify-between items-center z-10">
         <div className="text-white">
@@ -446,10 +478,10 @@ export function GameBoard({
         </div>
       </div>
 
-      {/* Board: everything stacked tightly, no flex-grow */}
-      <div className="flex flex-col pb-2 border-4 border-red-500">
+      {/* Board: top area grows to fill space above the bottom player panel, scrolls if needed */}
+      <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
         {/* Top row: up to 5 players in anti-clockwise turn order (no empty placeholders) */}
-        <div className="flex justify-center gap-1 sm:gap-2 px-1 sm:px-2 shrink-0 min-h-[72px] sm:min-h-[80px]">
+        <div className="flex justify-center gap-1 sm:gap-2 px-1 sm:px-2 pt-3 sm:pt-4 shrink-0 min-h-[72px] sm:min-h-[80px]">
           {topRowPlayers.map((player) => (
             <div key={player.id} className="flex-1 min-w-0 max-w-[100px] sm:max-w-[120px] flex justify-center items-center">
               <PlayerAvatar
@@ -486,57 +518,55 @@ export function GameBoard({
 
           {/* Center: Wild | Deck | Draw + turn message — sits right below top row, no big gap */}
           <div className="flex-1 min-w-0 flex flex-col items-center justify-start gap-2 sm:gap-3 max-w-lg">
-            <div className="flex items-center justify-center gap-1 sm:gap-4 scale-75 sm:scale-100 shrink-0">
+            <div className="flex items-end justify-center gap-2 sm:gap-4 shrink-0">
               {gameState.wildCardRank && (
                 <div className="flex flex-col items-center gap-0.5 sm:gap-1">
                   <div className="text-[10px] sm:text-xs font-semibold text-gray-600 whitespace-nowrap">Wild</div>
-                  <div className="transform scale-75 sm:scale-90">
-                    <Card
-                      card={{ rank: gameState.wildCardRank, suit: 'hearts', value: 0, id: 'wild-display' }}
-                      wildCardRank={gameState.wildCardRank}
-                      size="medium"
-                    />
-                  </div>
+                  <Card
+                    card={{ rank: gameState.wildCardRank, suit: 'hearts', value: 0, id: 'wild-display' }}
+                    wildCardRank={gameState.wildCardRank}
+                    size="medium"
+                  />
                 </div>
               )}
               <div
                 onClick={() => handleDraw('deck')}
                 className={`
-                  relative w-16 h-24 sm:w-24 sm:h-32 bg-blue-900 rounded-lg border-2 sm:border-4 border-white shadow-2xl
-                  flex items-center justify-center text-white font-bold text-base sm:text-xl
+                  relative w-16 h-24 bg-blue-900 rounded-lg border-2 border-white shadow-2xl
+                  flex items-center justify-center text-white font-bold text-sm
                   ${isMyTurn && hasDiscarded ? 'cursor-pointer hover:scale-110 hover:shadow-blue-500/50' : 'opacity-60'}
                   transition-all duration-200
                 `}
               >
                 <div className="text-center">
-                  <div className="text-3xl mb-1">🎴</div>
-                  <div className="text-sm">{gameState.deck.length}</div>
+                  <div className="text-2xl mb-0.5">🎴</div>
+                  <div className="text-xs">{gameState.deck.length}</div>
                 </div>
               </div>
-              <div className="text-gray-700 text-2xl sm:text-4xl font-bold">→</div>
+              <div className="text-gray-700 text-xl sm:text-2xl font-bold mb-3">→</div>
               <div className="flex flex-col items-center gap-0.5 sm:gap-1">
                 <div className="text-[10px] sm:text-xs font-semibold text-green-700 whitespace-nowrap">Draw Pile</div>
                 <div
                   onClick={() => handleDraw('discard')}
                   className={`
-                    relative w-16 h-24 sm:w-24 sm:h-32
-                    ${isMyTurn && hasDiscarded && gameState.discardPile.length > 0 ? 'cursor-pointer hover:scale-110 ring-2 ring-green-500' : 'opacity-90'}
+                    relative
+                    ${isMyTurn && hasDiscarded && gameState.discardPile.length > 0 ? 'cursor-pointer hover:scale-110 ring-2 ring-green-500 rounded-lg' : 'opacity-90'}
                     transition-all duration-200
                   `}
                 >
                   {gameState.discardPile.length > 0 ? (
                     <Card card={gameState.discardPile[gameState.discardPile.length - 1]} wildCardRank={gameState.wildCardRank} size="medium" />
                   ) : (
-                    <div className="w-full h-full bg-gray-300 rounded-lg border-2 sm:border-4 border-dashed border-gray-400 flex items-center justify-center text-gray-500 text-[10px] sm:text-xs text-center">Empty</div>
+                    <div className="w-16 h-24 bg-gray-300 rounded-lg border-2 border-dashed border-gray-400 flex items-center justify-center text-gray-500 text-[10px] text-center">Empty</div>
                   )}
                 </div>
               </div>
               {gameState.currentTurnDiscardPile.length > 0 && (
                 <div className="flex flex-col items-center gap-0.5 sm:gap-1">
                   <div className="text-[10px] sm:text-xs font-semibold text-orange-700 whitespace-nowrap">Just Discarded</div>
-                  <div className="relative w-16 h-24 sm:w-24 sm:h-32 opacity-75">
+                  <div className="relative opacity-75">
                     <Card card={gameState.currentTurnDiscardPile[gameState.currentTurnDiscardPile.length - 1]} wildCardRank={gameState.wildCardRank} size="medium" />
-                    <div className="absolute -top-1 -right-1 bg-orange-500 text-white rounded-full w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center text-[10px] sm:text-xs font-bold">
+                    <div className="absolute -top-1 -right-1 bg-orange-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold">
                       {gameState.currentTurnDiscardPile.length}
                     </div>
                   </div>
@@ -580,9 +610,13 @@ export function GameBoard({
           )}
         </div>
 
-        {/* Current Player — sits directly below deck area */}
-        {currentPlayer && (
-          <div className="w-full shrink-0 mt-2 bg-white bg-opacity-90 backdrop-blur-sm shadow-2xl p-2 sm:p-3">
+      </div>
+
+      {/* Current Player — fixed at bottom of screen */}
+      {currentPlayer && (
+        <div className={`w-full shrink-0 backdrop-blur-sm shadow-[0_-4px_20px_rgba(0,0,0,0.15)] p-2 sm:p-3 ${
+          isMyTurn ? 'turn-glow' : 'bg-white bg-opacity-95'
+        }`}>
           <div className="max-w-6xl mx-auto">
             {/* Player Info and Hand Value - Compact Row */}
             <div className="flex justify-between items-center mb-1 sm:mb-2 px-1 sm:px-4">
@@ -615,31 +649,47 @@ export function GameBoard({
               )}
             </div>
 
-            {/* Cards - More compact */}
-            <div className="flex justify-center items-end gap-0.5 sm:gap-1 mb-1 sm:mb-2 flex-wrap overflow-x-auto max-w-full px-1">
-              {orderedHand.map(card => (
-                <div
-                  key={card.id}
-                  data-card-id={card.id}
-                  draggable
-                  onDragStart={() => handleDragStart(card.id)}
-                  onDragOver={(e) => handleDragOver(e, card.id)}
-                  onDrop={(e) => handleDrop(e, card.id)}
-                  onDragEnd={handleDragEnd}
-                  onTouchStart={() => handleTouchStart(card.id)}
-                  onTouchMove={handleTouchMove}
-                  onTouchEnd={handleTouchEnd}
-                  className={`transform touch-none ${dragOverCardId === card.id ? 'border-2 border-blue-400 rounded-lg scale-95 sm:scale-100' : 'scale-95 sm:scale-100'}`}
-                >
-                  <Card
-                    card={card}
-                    wildCardRank={gameState.wildCardRank}
-                    isSelected={selectedCards.includes(card.id)}
-                    onClick={() => handleCardClick(card.id)}
-                    size="large"
-                  />
-                </div>
-              ))}
+            {/* Cards */}
+            <div className="flex justify-center items-end gap-0.5 sm:gap-1 mb-1 sm:mb-2 flex-wrap max-w-full px-1 pt-3">
+              {(() => {
+                const dragIdx = draggedCardId ? orderedHand.findIndex(c => c.id === draggedCardId) : -1;
+                const overIdx = dragOverCardId ? orderedHand.findIndex(c => c.id === dragOverCardId) : -1;
+                const insertBefore = dragIdx !== -1 && overIdx !== -1 && dragIdx > overIdx;
+
+                return orderedHand.map((card) => {
+                  const isBeingDragged = card.id === draggedCardId;
+                  const isDropTarget = card.id === dragOverCardId;
+                  const showInsertLeft = isDropTarget && insertBefore;
+                  const showInsertRight = isDropTarget && !insertBefore;
+
+                  let dragClass = '';
+                  if (isBeingDragged) {
+                    dragClass = 'opacity-40 scale-90';
+                  } else if (isDropTarget) {
+                    dragClass = `scale-105 ${showInsertLeft ? 'ml-6 sm:ml-8' : ''} ${showInsertRight ? 'mr-6 sm:mr-8' : ''}`;
+                  }
+
+                  return (
+                    <div
+                      key={card.id}
+                      data-card-id={card.id}
+                      onMouseDown={() => handleCardPointerDown(card.id)}
+                      onTouchStart={() => handleCardPointerDown(card.id)}
+                      onTouchMove={handleTouchMove}
+                      onTouchEnd={handleTouchEnd}
+                      className={`touch-none select-none transition-all duration-200 ${dragClass}`}
+                    >
+                      <Card
+                        card={card}
+                        wildCardRank={gameState.wildCardRank}
+                        isSelected={selectedCards.includes(card.id)}
+                        onClick={() => handleCardClick(card.id)}
+                        size="large"
+                      />
+                    </div>
+                  );
+                });
+              })()}
             </div>
 
             {/* Actions - More compact */}
@@ -702,33 +752,31 @@ export function GameBoard({
               </button>
             </div>
 
-            {isMyTurn && !hasDiscarded && handValue > 10 && (
-              <div className="text-center mt-1 sm:mt-2 text-blue-700 text-[10px] sm:text-xs font-semibold">
-                👉 Select and discard card(s) first
-              </div>
-            )}
-            
-            {isMyTurn && !hasDiscarded && handValue <= 10 && (
-              <div className="text-center mt-2 text-green-700 text-xs font-semibold animate-pulse">
-                🎯 You can call SHOW now (hand ≤ 10) or discard to continue
-              </div>
-            )}
-            
-            {isMyTurn && hasDiscarded && canSkipDraw && (
-              <div className="text-center mt-2 text-green-700 text-xs font-semibold">
-                ✅ Matching discard! Turn automatically passed.
-              </div>
-            )}
-            
-            {isMyTurn && hasDiscarded && !canSkipDraw && (
-              <div className="text-center mt-2 text-purple-700 text-xs font-semibold">
-                👉 Now draw a card from deck or discard pile
-              </div>
-            )}
+            <div className="h-5 sm:h-6 mt-1 flex items-center justify-center">
+              {isMyTurn && !hasDiscarded && handValue > 10 && (
+                <span className="text-blue-700 text-[10px] sm:text-xs font-semibold">
+                  👉 Select and discard card(s) first
+                </span>
+              )}
+              {isMyTurn && !hasDiscarded && handValue <= 10 && (
+                <span className="text-green-700 text-[10px] sm:text-xs font-semibold animate-pulse">
+                  🎯 You can call SHOW now (hand ≤ 10) or discard to continue
+                </span>
+              )}
+              {isMyTurn && hasDiscarded && canSkipDraw && (
+                <span className="text-green-700 text-[10px] sm:text-xs font-semibold">
+                  ✅ Matching discard! Turn automatically passed.
+                </span>
+              )}
+              {isMyTurn && hasDiscarded && !canSkipDraw && (
+                <span className="text-purple-700 text-[10px] sm:text-xs font-semibold">
+                  👉 Now draw a card from deck or discard pile
+                </span>
+              )}
+            </div>
           </div>
         </div>
       )}
-      </div>
 
       {/* Scoreboard Modal */}
       {showScoreboard && (

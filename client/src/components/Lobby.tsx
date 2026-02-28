@@ -11,10 +11,10 @@ export function Lobby({ onCreateRoom, onJoinRoom }: LobbyProps) {
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [endConditionType, setEndConditionType] = useState<EndConditionType>('roundLimit');
-  const [pointLimit, setPointLimit] = useState(200);
-  const [roundLimit, setRoundLimit] = useState(5);
+  const [pointLimitStr, setPointLimitStr] = useState('200');
+  const [roundLimitStr, setRoundLimitStr] = useState('5');
   const [timerEnabled, setTimerEnabled] = useState(false);
-  const [timerDuration, setTimerDuration] = useState(30);
+  const [timerDurationStr, setTimerDurationStr] = useState('30');
 
   const handleCreateRoom = () => {
     if (!playerName.trim()) {
@@ -24,10 +24,10 @@ export function Lobby({ onCreateRoom, onJoinRoom }: LobbyProps) {
 
     const settings: GameSettings = {
       endConditionType,
-      pointLimit,
-      roundLimit,
+      pointLimit: parseInt(pointLimitStr) || 200,
+      roundLimit: parseInt(roundLimitStr) || 5,
       timerEnabled,
-      timerDuration
+      timerDuration: parseInt(timerDurationStr) || 30
     };
 
     onCreateRoom(playerName.trim(), settings);
@@ -135,8 +135,9 @@ export function Lobby({ onCreateRoom, onJoinRoom }: LobbyProps) {
                 {endConditionType === 'pointLimit' && (
                   <input
                     type="number"
-                    value={pointLimit}
-                    onChange={(e) => setPointLimit(parseInt(e.target.value) || 200)}
+                    value={pointLimitStr}
+                    onChange={(e) => setPointLimitStr(e.target.value)}
+                    onBlur={() => { if (!pointLimitStr.trim()) setPointLimitStr('200'); }}
                     min={50}
                     max={500}
                     className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg ml-8"
@@ -160,8 +161,9 @@ export function Lobby({ onCreateRoom, onJoinRoom }: LobbyProps) {
                 {endConditionType === 'roundLimit' && (
                   <input
                     type="number"
-                    value={roundLimit}
-                    onChange={(e) => setRoundLimit(parseInt(e.target.value) || 5)}
+                    value={roundLimitStr}
+                    onChange={(e) => setRoundLimitStr(e.target.value)}
+                    onBlur={() => { if (!roundLimitStr.trim()) setRoundLimitStr('5'); }}
                     min={1}
                     max={20}
                     className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg ml-8"
@@ -193,8 +195,9 @@ export function Lobby({ onCreateRoom, onJoinRoom }: LobbyProps) {
                     <label className="block text-xs text-gray-600 mb-1">Duration (seconds)</label>
                     <input
                       type="number"
-                      value={timerDuration}
-                      onChange={(e) => setTimerDuration(parseInt(e.target.value) || 30)}
+                      value={timerDurationStr}
+                      onChange={(e) => setTimerDurationStr(e.target.value)}
+                      onBlur={() => { if (!timerDurationStr.trim()) setTimerDurationStr('30'); }}
                       min={10}
                       max={120}
                       className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg"

@@ -203,7 +203,7 @@ export function GameBoard({
     onCallShow();
   };
 
-  // Drag and drop handlers
+  // Drag and drop handlers (desktop)
   const handleDragStart = (cardId: string) => {
     setDraggedCardId(cardId);
   };
@@ -222,12 +222,10 @@ export function GameBoard({
 
     if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return;
 
-    // Rotate cards in circular order (not swap)
     const newOrder = orderedHand.map(c => c.id);
     const [draggedCardId_] = newOrder.splice(draggedIndex, 1);
     newOrder.splice(targetIndex, 0, draggedCardId_);
     
-    // Update the local card order state
     setLocalCardOrder(newOrder);
     
     setDraggedCardId(null);
@@ -235,6 +233,51 @@ export function GameBoard({
   };
 
   const handleDragEnd = () => {
+    setDraggedCardId(null);
+    setDragOverCardId(null);
+  };
+
+  // Touch handlers for iOS / mobile reordering
+  const touchDragRef = useRef<{ cardId: string; moved: boolean } | null>(null);
+
+  const handleTouchStart = (cardId: string) => {
+    touchDragRef.current = { cardId, moved: false };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchDragRef.current) return;
+
+    const touch = e.touches[0];
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    const cardEl = el?.closest('[data-card-id]') as HTMLElement | null;
+
+    if (!cardEl) return;
+
+    const targetCardId = cardEl.getAttribute('data-card-id');
+    if (targetCardId && targetCardId !== touchDragRef.current.cardId) {
+      if (!touchDragRef.current.moved) {
+        touchDragRef.current.moved = true;
+        setDraggedCardId(touchDragRef.current.cardId);
+      }
+      setDragOverCardId(targetCardId);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (touchDragRef.current?.moved && dragOverCardId && currentPlayer) {
+      const srcId = touchDragRef.current.cardId;
+      const draggedIndex = orderedHand.findIndex(c => c.id === srcId);
+      const targetIndex = orderedHand.findIndex(c => c.id === dragOverCardId);
+
+      if (draggedIndex !== -1 && targetIndex !== -1 && draggedIndex !== targetIndex) {
+        const newOrder = orderedHand.map(c => c.id);
+        const [removed] = newOrder.splice(draggedIndex, 1);
+        newOrder.splice(targetIndex, 0, removed);
+        setLocalCardOrder(newOrder);
+      }
+    }
+
+    touchDragRef.current = null;
     setDraggedCardId(null);
     setDragOverCardId(null);
   };
@@ -247,7 +290,7 @@ export function GameBoard({
   if (gameState.gamePhase === 'roundEnd' || gameState.gamePhase === 'gameEnd') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center p-2 sm:p-4">
-        <div className="bg-white rounded-2xl shadow-2xl p-4 sm:p-8 max-w-2xl w-full max-h-[95vh] overflow-y-auto">
+        <div className="bg-white rounded-2xl shadow-2xl p-4 sm:p-8 max-w-4xl w-full max-h-[95vh] overflow-y-auto">
           <h2 className="text-3xl font-bold text-center mb-6">
             {gameState.gamePhase === 'gameEnd' ? '🏆 Game Over!' : '🎯 Round Over!'}
           </h2>
@@ -265,65 +308,68 @@ export function GameBoard({
 
           <div className="mb-6">
             <h3 className="font-semibold mb-3">
-              {gameState.gamePhase === 'gameEnd' ? 'Final Scores' : 'Round results'}
+              {gameState.gamePhase === 'gameEnd' ? 'Final Scores' : 'Round Results'}
             </h3>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-gray-100 border-b border-gray-300">
-                    <th className="px-4 py-2 text-left">Player</th>
-                    <th className="px-4 py-2 text-center">Round score</th>
-                    <th className="px-4 py-2 text-center">Total score</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    const roundScores = lastRoundEndData?.scores ?? gameState.players.map(p => ({
-                      playerId: p.id,
-                      playerName: p.name,
-                      handTotal: 0,
-                      roundScore: p.roundScores[p.roundScores.length - 1] ?? 0,
-                      totalScore: p.totalScore,
-                      isEliminated: p.isEliminated
-                    }));
-                    const whoShowed = lastRoundEndData?.showResult?.playerId;
-                    const roundWinnerId = roundScores.length
-                      ? roundScores.reduce((low, p) => (p.roundScore < low.roundScore ? p : low)).playerId
-                      : null;
-                    return roundScores
-                      .slice()
-                      .sort((a, b) => a.totalScore - b.totalScore)
-                      .map((row) => {
-                        const isWinner = row.playerId === roundWinnerId;
-                        const isLoser = !isWinner && !row.isEliminated;
+            {(() => {
+              const maxRounds = Math.max(...gameState.players.map(p => p.roundScores.length), 0);
+              const whoShowed = lastRoundEndData?.showResult?.playerId;
+              const sortedPlayers = gameState.players
+                .slice()
+                .sort((a, b) => a.totalScore - b.totalScore);
+
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-gray-100 border-b border-gray-300">
+                        <th className="px-3 py-2 text-left sticky left-0 bg-gray-100 z-10">Player</th>
+                        {Array.from({ length: maxRounds }, (_, i) => (
+                          <th key={i} className="px-2 py-2 text-center min-w-[40px]">R{i + 1}</th>
+                        ))}
+                        <th className="px-3 py-2 text-center font-bold bg-blue-50">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedPlayers.map((player, idx) => {
+                        const isLeader = idx === 0 && !player.isEliminated;
                         return (
                           <tr
-                            key={row.playerId}
+                            key={player.id}
                             className={`
                               border-b border-gray-200
-                              ${isWinner ? 'bg-green-100 border-l-4 border-l-green-500' : ''}
-                              ${isLoser ? 'bg-red-50 border-l-4 border-l-red-500' : ''}
-                              ${row.isEliminated ? 'opacity-60' : ''}
-                              ${!isWinner && !isLoser ? 'bg-gray-50' : ''}
+                              ${isLeader ? 'bg-green-100 border-l-4 border-l-green-500' : ''}
+                              ${player.isEliminated ? 'opacity-60 bg-gray-50' : ''}
+                              ${!isLeader && !player.isEliminated ? 'bg-red-50 border-l-4 border-l-red-500' : ''}
                             `}
                           >
-                            <td className="px-4 py-3 font-semibold">
-                              {isWinner && '🏆 '}
-                              {row.playerName}
-                              {whoShowed === row.playerId && (
-                                <span className="ml-2 text-xs font-normal text-blue-600">(called show)</span>
+                            <td className="px-3 py-3 font-semibold sticky left-0 bg-inherit z-10 whitespace-nowrap">
+                              {isLeader && '🏆 '}
+                              {player.name}
+                              {whoShowed === player.id && (
+                                <span className="ml-1 text-xs font-normal text-blue-600">(called show)</span>
                               )}
-                              {row.isEliminated && ' ❌'}
+                              {player.isEliminated && ' ❌'}
                             </td>
-                            <td className="px-4 py-3 text-center font-bold">{row.roundScore}</td>
-                            <td className="px-4 py-3 text-center font-bold">{row.totalScore}</td>
+                            {Array.from({ length: maxRounds }, (_, i) => (
+                              <td key={i} className="px-2 py-3 text-center">
+                                {player.roundScores[i] !== undefined ? (
+                                  <span className={player.roundScores[i] === 0 ? 'text-green-600 font-bold' : ''}>
+                                    {player.roundScores[i]}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </td>
+                            ))}
+                            <td className="px-3 py-3 text-center font-bold bg-blue-50">{player.totalScore}</td>
                           </tr>
                         );
-                      });
-                  })()}
-                </tbody>
-              </table>
-            </div>
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           </div>
 
           {gameState.gamePhase === 'roundEnd' && (
@@ -349,9 +395,9 @@ export function GameBoard({
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 relative overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 flex flex-col">
       {/* Header */}
-      <div className="absolute top-0 left-0 right-0 bg-gradient-to-r from-blue-600 to-purple-600 shadow-lg p-2 sm:p-4 flex justify-between items-center z-10">
+      <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-purple-600 shadow-lg p-2 sm:p-4 flex justify-between items-center z-10">
         <div className="text-white">
           <div className="text-xs sm:text-sm font-semibold">Round {gameState.currentRound}</div>
           <div className="text-[10px] sm:text-xs">
@@ -400,8 +446,8 @@ export function GameBoard({
         </div>
       </div>
 
-      {/* Board: top row (dynamic slots) + middle (left only if 5+ | center | right only if 7+) */}
-      <div className="absolute inset-0 pt-20 sm:pt-24 pb-2 flex flex-col">
+      {/* Board: everything stacked tightly, no flex-grow */}
+      <div className="flex flex-col pb-2 border-4 border-red-500">
         {/* Top row: up to 5 players in anti-clockwise turn order (no empty placeholders) */}
         <div className="flex justify-center gap-1 sm:gap-2 px-1 sm:px-2 shrink-0 min-h-[72px] sm:min-h-[80px]">
           {topRowPlayers.map((player) => (
@@ -419,7 +465,7 @@ export function GameBoard({
         </div>
 
         {/* Middle: left 2 (when 6+ players) | center (deck + turn) | right 2 (when 8+ players); all in turn order */}
-        <div className="flex items-start justify-center gap-2 sm:gap-4 px-2 pt-8 sm:pt-12 flex-1 min-h-0">
+        <div className="flex items-start justify-center gap-2 sm:gap-4 px-2 pt-2 sm:pt-4 shrink-0">
           {/* Left column: 2 slots when we have 6+ other players (players 6–7 in anti-clockwise order) */}
           {leftColPlayers.length > 0 && (
             <div className="flex flex-col justify-center gap-2 sm:gap-4 w-14 sm:w-20 shrink-0">
@@ -533,11 +579,10 @@ export function GameBoard({
             </div>
           )}
         </div>
-      </div>
 
-      {/* Current Player (Bottom) */}
-      {currentPlayer && (
-        <div className="absolute bottom-0 left-0 right-0 bg-white bg-opacity-90 backdrop-blur-sm shadow-2xl p-2 sm:p-3">
+        {/* Current Player — sits directly below deck area */}
+        {currentPlayer && (
+          <div className="w-full shrink-0 mt-2 bg-white bg-opacity-90 backdrop-blur-sm shadow-2xl p-2 sm:p-3">
           <div className="max-w-6xl mx-auto">
             {/* Player Info and Hand Value - Compact Row */}
             <div className="flex justify-between items-center mb-1 sm:mb-2 px-1 sm:px-4">
@@ -575,12 +620,16 @@ export function GameBoard({
               {orderedHand.map(card => (
                 <div
                   key={card.id}
+                  data-card-id={card.id}
                   draggable
                   onDragStart={() => handleDragStart(card.id)}
                   onDragOver={(e) => handleDragOver(e, card.id)}
                   onDrop={(e) => handleDrop(e, card.id)}
                   onDragEnd={handleDragEnd}
-                  className={`transform ${dragOverCardId === card.id ? 'border-2 border-blue-400 rounded-lg scale-95 sm:scale-100' : 'scale-95 sm:scale-100'}`}
+                  onTouchStart={() => handleTouchStart(card.id)}
+                  onTouchMove={handleTouchMove}
+                  onTouchEnd={handleTouchEnd}
+                  className={`transform touch-none ${dragOverCardId === card.id ? 'border-2 border-blue-400 rounded-lg scale-95 sm:scale-100' : 'scale-95 sm:scale-100'}`}
                 >
                   <Card
                     card={card}
@@ -679,6 +728,7 @@ export function GameBoard({
           </div>
         </div>
       )}
+      </div>
 
       {/* Scoreboard Modal */}
       {showScoreboard && (

@@ -162,20 +162,30 @@ export class GameRoom {
         this.state.currentTurnPlayerId = activePlayerIds[randomIndex];
         console.log(`First round: Random start player selected: ${this.state.roundStartPlayerId} (index ${randomIndex} in visual order)`);
       } else {
-        // Subsequent rounds: Move to next player in anti-clockwise direction (based on visual order)
-        const prevStartIndex = activePlayerIds.findIndex(id => id === this.state.roundStartPlayerId);
-        if (prevStartIndex !== -1) {
-          // Move anti-clockwise: previous index in visual order (with wrap-around)
-          const nextStartIndex = (prevStartIndex - 1 + activePlayerIds.length) % activePlayerIds.length;
-          this.state.roundStartPlayerId = activePlayerIds[nextStartIndex];
-          this.state.currentTurnPlayerId = activePlayerIds[nextStartIndex];
-          console.log(`Round ${this.state.currentRound}: Round-robin start player: ${this.state.roundStartPlayerId} (moved anti-clockwise from index ${prevStartIndex} to ${nextStartIndex})`);
-        } else {
-          // Fallback: if previous start player not found (eliminated), pick first available in visual order
-          this.state.roundStartPlayerId = activePlayerIds[0];
-          this.state.currentTurnPlayerId = activePlayerIds[0];
-          console.log(`Round ${this.state.currentRound}: Fallback start player: ${this.state.roundStartPlayerId}`);
+        // Subsequent rounds: walk anti-clockwise from previous starter in the FULL playerOrder
+        // so round-robin is preserved even when the previous starter was eliminated
+        const prevStartIndexFull = this.state.playerOrder.indexOf(this.state.roundStartPlayerId!);
+
+        let nextStartId: string | null = null;
+        if (prevStartIndexFull !== -1) {
+          for (let step = 1; step <= this.state.playerOrder.length; step++) {
+            const candidateIndex = (prevStartIndexFull - step + this.state.playerOrder.length) % this.state.playerOrder.length;
+            const candidateId = this.state.playerOrder[candidateIndex];
+            const candidate = this.state.players.find(p => p.id === candidateId);
+            if (candidate && !candidate.isEliminated) {
+              nextStartId = candidateId;
+              break;
+            }
+          }
         }
+
+        if (!nextStartId) {
+          nextStartId = activePlayerIds[0];
+        }
+
+        this.state.roundStartPlayerId = nextStartId;
+        this.state.currentTurnPlayerId = nextStartId;
+        console.log(`Round ${this.state.currentRound}: Round-robin start player: ${this.state.roundStartPlayerId} (from full playerOrder)`);
       }
       this.state.turnStartTime = Date.now();
     }
@@ -310,34 +320,36 @@ export class GameRoom {
 
     // Assign scores - only push if this is the first time scoring this round
     // Check by comparing roundScores length with currentRound
+    const MAX_ROUND_SCORE = 40;
+
     if (isGoodShow) {
-      // Good show - caller gets 0, others get their hand total
+      // Good show - caller gets 0, others get their hand total (capped at 40)
       allHandTotals.forEach(({ player: p, handTotal }) => {
-        // Only push score if we haven't scored this round yet
         if (p.roundScores.length < this.state.currentRound) {
           if (p.id === playerId) {
             p.roundScores.push(0);
             p.totalScore += 0;
           } else {
-            p.roundScores.push(handTotal);
-            p.totalScore += handTotal;
+            const score = Math.min(handTotal, MAX_ROUND_SCORE);
+            p.roundScores.push(score);
+            p.totalScore += score;
           }
         }
       });
     } else {
-      // Bad show - caller gets 40, lowest gets 0, others get their hand total
+      // Bad show - caller gets 40, lowest gets 0, others get their hand total (capped at 40)
       allHandTotals.forEach(({ player: p, handTotal }) => {
-        // Only push score if we haven't scored this round yet
         if (p.roundScores.length < this.state.currentRound) {
           if (p.id === playerId) {
-            p.roundScores.push(40);
-            p.totalScore += 40;
+            p.roundScores.push(MAX_ROUND_SCORE);
+            p.totalScore += MAX_ROUND_SCORE;
           } else if (handTotal === lowestHandTotal) {
             p.roundScores.push(0);
             p.totalScore += 0;
           } else {
-            p.roundScores.push(handTotal);
-            p.totalScore += handTotal;
+            const score = Math.min(handTotal, MAX_ROUND_SCORE);
+            p.roundScores.push(score);
+            p.totalScore += score;
           }
         }
       });

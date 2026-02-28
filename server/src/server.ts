@@ -19,6 +19,12 @@ const io = new Server(httpServer, {
     origin: process.env.NODE_ENV === 'production' ? allowedOrigins : '*',
     methods: ['GET', 'POST'],
     credentials: true
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 2 * 60 * 1000,
+    skipMiddlewares: true,
   }
 });
 
@@ -67,13 +73,34 @@ setInterval(() => {
   logger.info(`📊 Active rooms: ${roomManager.getRoomCount()}, Connected clients: ${io.engine.clientsCount}`);
 }, CLEANUP_INTERVAL);
 
-// Prevent process crash on unhandled errors (e.g. after 3 rounds on Render)
+// Broadcast server errors to all connected clients so they see a browser popup
+function notifyClientsOfError(message: string) {
+  try {
+    io.emit('serverError', { message });
+  } catch (_) {
+    // Socket may be in a broken state — nothing more we can do
+  }
+}
+
 process.on('uncaughtException', (err) => {
-  logger.error(`Uncaught exception: ${err.message}`, err);
+  logger.error(`Uncaught exception: ${err.stack || err.message}`);
+  notifyClientsOfError(`Server error: ${err.message}`);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error(`Unhandled rejection at ${promise}: ${reason}`);
+process.on('unhandledRejection', (reason: any) => {
+  const msg = reason?.stack || reason?.message || String(reason);
+  logger.error(`Unhandled rejection: ${msg}`);
+  notifyClientsOfError(`Server error: ${reason?.message || 'Unhandled rejection'}`);
+});
+
+process.on('SIGTERM', () => {
+  logger.error('Received SIGTERM — server shutting down');
+  notifyClientsOfError('Server is restarting. You will be reconnected automatically.');
+});
+
+process.on('SIGINT', () => {
+  logger.error('Received SIGINT — server shutting down');
+  notifyClientsOfError('Server is shutting down.');
 });
 
 const PORT = process.env.PORT || 3001;

@@ -28,7 +28,7 @@ function clearSession() {
 }
 
 function App() {
-  const { socket, isConnected } = useSocket();
+  const { socket, isConnected, isReconnecting, serverError, dismissServerError } = useSocket();
   const [appState, setAppState] = useState<AppState>('lobby');
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [playerId, setPlayerId] = useState<string>('');
@@ -154,7 +154,7 @@ function App() {
   }, [socket]); // Removed gameState dependency to prevent re-registration
 
   const handleCreateRoom = (playerName: string, settings: GameSettings) => {
-    if (!socket) return;
+    if (!socket?.connected) return;
 
     socket.emit('createRoom', { playerName, settings }, (response: any) => {
       if (response.success) {
@@ -168,7 +168,7 @@ function App() {
   };
 
   const handleJoinRoom = (playerName: string, roomCode: string) => {
-    if (!socket) return;
+    if (!socket?.connected) return;
 
     socket.emit('joinRoom', { playerName, roomCode }, (response: any) => {
       if (response.success) {
@@ -182,7 +182,7 @@ function App() {
   };
 
   const handleStartGame = () => {
-    if (!socket) return;
+    if (!socket?.connected) return;
 
     socket.emit('startGame', (response: any) => {
       if (!response.success) {
@@ -192,7 +192,7 @@ function App() {
   };
 
   const handleLeaveRoom = () => {
-    if (!socket) return;
+    if (!socket?.connected) return;
     clearSession();
     socket.emit('leaveRoom');
     setAppState('lobby');
@@ -200,7 +200,7 @@ function App() {
   };
 
   const handleDrawCard = (source: 'deck' | 'discard') => {
-    if (!socket) return;
+    if (!socket?.connected) return;
 
     socket.emit('drawCard', { source }, (response: any) => {
       if (!response.success) {
@@ -210,7 +210,7 @@ function App() {
   };
 
   const handleDiscardCards = (cardIds: string[]) => {
-    if (!socket) return;
+    if (!socket?.connected) return;
 
     socket.emit('discardCards', { cardIds }, (response: any) => {
       if (!response.success) {
@@ -221,7 +221,7 @@ function App() {
   };
 
   const handleCallShow = () => {
-    if (!socket) return;
+    if (!socket?.connected) return;
     
     socket.emit('callShow', (response: any) => {
       if (!response.success) {
@@ -231,7 +231,7 @@ function App() {
   };
 
   const handleStartNextRound = () => {
-    if (!socket) return;
+    if (!socket?.connected) return;
 
     socket.emit('startNextRound', (response: any) => {
       if (!response.success) {
@@ -241,7 +241,7 @@ function App() {
   };
 
   const handleEndGameByHost = () => {
-    if (!socket) return;
+    if (!socket?.connected) return;
     socket.emit('endGameByHost', (response: any) => {
       if (response?.success) {
         clearSession();
@@ -253,9 +253,32 @@ function App() {
     });
   };
 
+  const serverErrorPopup = serverError && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm mx-4 text-center">
+        <div className="text-4xl mb-3">⚠️</div>
+        <div className="text-lg font-bold text-gray-800 mb-2">Server Error</div>
+        <div className="text-gray-600 mb-6 text-sm break-words">{serverError}</div>
+        <button
+          onClick={dismissServerError}
+          className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+        >
+          OK
+        </button>
+      </div>
+    </div>
+  );
+
+  const reconnectingBanner = isReconnecting && (
+    <div className="fixed top-0 left-0 right-0 z-40 bg-yellow-500 text-yellow-950 text-center py-2 px-4 text-sm font-medium shadow-md animate-pulse">
+      Reconnecting to server... Actions are temporarily disabled.
+    </div>
+  );
+
   if (!isConnected) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center">
+        {serverErrorPopup}
         <div className="bg-white rounded-2xl shadow-2xl p-8 text-center">
           <div className="text-4xl mb-4">🎴</div>
           <div className="text-xl font-bold text-gray-800">Connecting to server...</div>
@@ -268,32 +291,46 @@ function App() {
   }
 
   if (appState === 'lobby') {
-    return <Lobby onCreateRoom={handleCreateRoom} onJoinRoom={handleJoinRoom} />;
+    return (
+      <>
+        {serverErrorPopup}
+        {reconnectingBanner}
+        <Lobby onCreateRoom={handleCreateRoom} onJoinRoom={handleJoinRoom} />
+      </>
+    );
   }
 
   if (appState === 'waitingRoom' && gameState) {
     return (
-      <WaitingRoom
-        gameState={gameState}
-        playerId={playerId}
-        onStartGame={handleStartGame}
-        onLeaveRoom={handleLeaveRoom}
-      />
+      <>
+        {serverErrorPopup}
+        {reconnectingBanner}
+        <WaitingRoom
+          gameState={gameState}
+          playerId={playerId}
+          onStartGame={handleStartGame}
+          onLeaveRoom={handleLeaveRoom}
+        />
+      </>
     );
   }
 
   if (appState === 'playing' && gameState) {
     return (
-      <GameBoard
-        gameState={gameState}
-        playerId={playerId}
-        lastRoundEndData={lastRoundEndData}
-        onDrawCard={handleDrawCard}
-        onDiscardCards={handleDiscardCards}
-        onCallShow={handleCallShow}
-        onStartNextRound={handleStartNextRound}
-        onEndGameByHost={handleEndGameByHost}
-      />
+      <>
+        {serverErrorPopup}
+        {reconnectingBanner}
+        <GameBoard
+          gameState={gameState}
+          playerId={playerId}
+          lastRoundEndData={lastRoundEndData}
+          onDrawCard={handleDrawCard}
+          onDiscardCards={handleDiscardCards}
+          onCallShow={handleCallShow}
+          onStartNextRound={handleStartNextRound}
+          onEndGameByHost={handleEndGameByHost}
+        />
+      </>
     );
   }
 

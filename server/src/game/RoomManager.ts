@@ -51,16 +51,12 @@ export class RoomManager {
       const age = now - creationTime;
       const state = room.getState();
       
-      // Aggressive cleanup strategy:
-      // 1. Finished games (gameEnd): 3 min after completion
-      // 2. Abandoned lobbies: 15 min if no game started
-      // 3. All players disconnected: 2 min (instant cleanup)
-      // 4. Active games abandoned > 1 hour: assume dead
+      const allDisconnected = state.players.every(p => !p.isConnected);
       const shouldCleanup = 
-        (state.gamePhase === 'gameEnd' && age > 180000) || // 3 min - finished games
-        (state.gamePhase === 'lobby' && age > 900000) || // 15 min - abandoned lobbies
-        (state.players.every(p => !p.isConnected) && age > 120000) || // 2 min - all disconnected
-        (age > 3600000); // 1 hour - anything still alive
+        (state.gamePhase === 'gameEnd' && age > 180000) ||
+        (state.gamePhase === 'lobby' && age > 900000) ||
+        (allDisconnected && age > 120000) ||
+        (age > 3600000 && allDisconnected);
       
       if (shouldCleanup) {
         logger.cleanup(`Stale room ${roomCode}`, {

@@ -51,11 +51,11 @@ export class RoomManager {
       const age = now - creationTime;
       const state = room.getState();
       
-      const allDisconnected = state.players.every(p => !p.isConnected);
+      const allDisconnected = state.players.length === 0 || state.players.every(p => !p.isConnected);
       const shouldCleanup = 
-        (state.gamePhase === 'gameEnd' && age > 180000) ||
+        (state.gamePhase === 'gameEnd' && age > 300000) ||
         (state.gamePhase === 'lobby' && age > 900000) ||
-        (allDisconnected && age > 120000) ||
+        (allDisconnected && age > 300000) ||
         (age > 3600000 && allDisconnected);
       
       if (shouldCleanup) {

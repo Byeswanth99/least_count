@@ -68,6 +68,7 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
           return;
         }
         socket.join(data.roomCode);
+        cancelScheduledCleanup(data.roomCode);
         const gameState = room.getState();
         callback({ success: true, gameState });
         io.to(data.roomCode).emit('playerReconnected', { playerId: socket.id, players: gameState.players });
@@ -301,6 +302,33 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
   });
 }
 
+const ROOM_CLEANUP_DELAY = 5 * 60 * 1000; // 5 minutes
+
+function scheduleRoomCleanup(roomCode: string, roomManager: RoomManager) {
+  cancelScheduledCleanup(roomCode);
+  logger.cleanup(`Scheduling cleanup for room ${roomCode} in 5 minutes...`);
+  const timer = setTimeout(() => {
+    cleanupTimers.delete(roomCode);
+    const room = roomManager.getRoom(roomCode);
+    if (!room) return;
+    const s = room.getState();
+    if (s.players.length === 0 || s.players.every(p => !p.isConnected)) {
+      logger.cleanup(`Cleaning up abandoned room: ${roomCode}`);
+      cleanupRoom(roomCode, roomManager);
+    }
+  }, ROOM_CLEANUP_DELAY);
+  cleanupTimers.set(roomCode, timer);
+}
+
+function cancelScheduledCleanup(roomCode: string) {
+  const existing = cleanupTimers.get(roomCode);
+  if (existing) {
+    clearTimeout(existing);
+    cleanupTimers.delete(roomCode);
+    logger.debug(`Cancelled scheduled cleanup for room: ${roomCode}`);
+  }
+}
+
 function handlePlayerDisconnect(playerId: string, io: Server, roomManager: RoomManager) {
   const result = roomManager.getRoomByPlayerId(playerId);
   if (!result) return;
@@ -308,13 +336,11 @@ function handlePlayerDisconnect(playerId: string, io: Server, roomManager: RoomM
   const { roomCode, room } = result;
   const state = room.getState();
 
-  // If game hasn't started, remove player
   if (state.gamePhase === 'lobby') {
     room.removePlayer(playerId);
-    
-    // If no players left, delete room and cleanup
+
     if (state.players.length === 0) {
-      cleanupRoom(roomCode, roomManager);
+      scheduleRoomCleanup(roomCode, roomManager);
     } else {
       io.to(roomCode).emit('playerLeft', { 
         playerId,
@@ -322,31 +348,19 @@ function handlePlayerDisconnect(playerId: string, io: Server, roomManager: RoomM
       });
     }
   } else if (state.gamePhase === 'gameEnd') {
-    // Game has ended - safe to remove player and potentially delete room
     room.removePlayer(playerId);
-    
-    // If no players left or all disconnected, delete room
+
     if (state.players.length === 0 || state.players.every(p => !p.isConnected)) {
-      logger.cleanup(`Cleaning up finished game room: ${roomCode}`);
-      cleanupRoom(roomCode, roomManager);
+      scheduleRoomCleanup(roomCode, roomManager);
     }
   } else {
-    // Mark player as disconnected but keep in game
     const player = state.players.find(p => p.id === playerId);
     if (player) {
       player.isConnected = false;
       io.to(roomCode).emit('playerDisconnected', { playerId });
-      
-      // If all players disconnected during active game, cleanup after delay
+
       if (state.players.every(p => !p.isConnected)) {
-        logger.cleanup(`All players disconnected from room ${roomCode}. Scheduling cleanup...`);
-        setTimeout(() => {
-          const currentResult = roomManager.getRoomByPlayerId(playerId);
-          if (currentResult && currentResult.room.getState().players.every(p => !p.isConnected)) {
-            logger.cleanup(`Cleaning up abandoned room: ${roomCode}`);
-            cleanupRoom(roomCode, roomManager);
-          }
-        }, 60000); // Cleanup after 1 minute of all players being disconnected
+        scheduleRoomCleanup(roomCode, roomManager);
       }
     }
   }
@@ -354,20 +368,18 @@ function handlePlayerDisconnect(playerId: string, io: Server, roomManager: RoomM
 
 // Centralized room cleanup function
 function cleanupRoom(roomCode: string, roomManager: RoomManager) {
-  // Clear any active timers
   const existingTimer = turnTimers.get(roomCode);
   if (existingTimer) {
     clearTimeout(existingTimer);
     turnTimers.delete(roomCode);
-    logger.debug(`Cleared timer for room: ${roomCode}`);
   }
-  
-  // Delete the room
+  cancelScheduledCleanup(roomCode);
   roomManager.deleteRoom(roomCode);
 }
 
-// Turn timer management
+// Timer management
 const turnTimers: Map<string, NodeJS.Timeout> = new Map();
+const cleanupTimers: Map<string, NodeJS.Timeout> = new Map();
 
 function startTurnTimer(io: Server, roomCode: string, room: any) {
   const state = room.getState();

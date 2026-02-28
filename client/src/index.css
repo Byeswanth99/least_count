@@ -21,8 +21,8 @@ body {
 }
 
 @keyframes glow-pulse {
-  0%, 100% { background-color: rgba(255, 247, 237, 0.95); }
-  50% { background-color: rgba(251, 146, 60, 0.35); }
+  0%, 100% { background-color: rgba(255, 245, 245, 0.95); }
+  50% { background-color: rgba(255, 0, 0, 0.18); }
 }
 
 .turn-glow {

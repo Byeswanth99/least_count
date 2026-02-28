@@ -204,19 +204,22 @@ export function GameBoard({
     onCallShow();
   };
 
-  // Unified card reorder — works via mouse (desktop) and touch (mobile)
+  // Unified card reorder + drag-to-discard — mouse (desktop) and touch (mobile)
   const dragRef = useRef<{ cardId: string; moved: boolean } | null>(null);
-  const dragStateRef = useRef({ draggedCardId: null as string | null, dragOverCardId: null as string | null });
+  const dragStateRef = useRef({ dragOverCardId: null as string | null, overDiscardZone: false });
   const ghostRef = useRef<HTMLDivElement | null>(null);
+  const [overDiscardZone, setOverDiscardZone] = useState(false);
 
-  const findCardUnderPoint = useCallback((x: number, y: number): string | null => {
-    if (!dragRef.current) return null;
+  const findTargetUnderPoint = useCallback((x: number, y: number): { cardId: string | null; discardZone: boolean } => {
+    if (!dragRef.current) return { cardId: null, discardZone: false };
     const srcEl = document.querySelector(`[data-card-id="${dragRef.current.cardId}"]`) as HTMLElement | null;
     if (srcEl) srcEl.style.visibility = 'hidden';
     const el = document.elementFromPoint(x, y);
     if (srcEl) srcEl.style.visibility = '';
+
     const cardEl = el?.closest('[data-card-id]') as HTMLElement | null;
-    return cardEl?.getAttribute('data-card-id') ?? null;
+    const zoneEl = el?.closest('[data-drop-zone="discard"]') as HTMLElement | null;
+    return { cardId: cardEl?.getAttribute('data-card-id') ?? null, discardZone: !!zoneEl };
   }, []);
 
   const updateGhost = useCallback((x: number, y: number) => {
@@ -260,37 +263,65 @@ export function GameBoard({
 
     updateGhost(x, y);
 
-    const targetId = findCardUnderPoint(x, y);
+    const { cardId: targetId, discardZone } = findTargetUnderPoint(x, y);
+
+    dragStateRef.current.overDiscardZone = discardZone;
+    setOverDiscardZone(discardZone);
+
     if (targetId && targetId !== dragRef.current.cardId) {
       setDragOverCardId(targetId);
       dragStateRef.current.dragOverCardId = targetId;
+    } else if (discardZone) {
+      setDragOverCardId(null);
+      dragStateRef.current.dragOverCardId = null;
     }
-  }, [findCardUnderPoint, showGhost, updateGhost]);
+  }, [findTargetUnderPoint, showGhost, updateGhost]);
 
   const finishDrag = useCallback(() => {
     const ref = dragRef.current;
-    const overCardId = dragStateRef.current.dragOverCardId;
-    if (ref?.moved && overCardId && currentPlayer) {
-      const hand = orderedHand;
-      const srcIdx = hand.findIndex(c => c.id === ref.cardId);
-      const tgtIdx = hand.findIndex(c => c.id === overCardId);
-      if (srcIdx !== -1 && tgtIdx !== -1 && srcIdx !== tgtIdx) {
-        const newOrder = hand.map(c => c.id);
-        const [removed] = newOrder.splice(srcIdx, 1);
-        newOrder.splice(tgtIdx, 0, removed);
-        setLocalCardOrder(newOrder);
+    if (!ref?.moved) {
+      removeGhost();
+      dragRef.current = null;
+      return;
+    }
+
+    // Drag-to-discard: drop card on the discard zone
+    if (dragStateRef.current.overDiscardZone && isMyTurn && !hasDiscarded) {
+      const cardId = ref.cardId;
+      // If this card is part of a multi-selection, discard all selected; otherwise discard just this card
+      const toDiscard = selectedCards.includes(cardId) && selectedCards.length > 0
+        ? selectedCards
+        : [cardId];
+      if (soundEnabled) playSound('discard');
+      onDiscardCards(toDiscard);
+      setSelectedCards([]);
+      setHasDiscarded(true);
+    } else {
+      // Reorder within hand
+      const overCardId = dragStateRef.current.dragOverCardId;
+      if (overCardId && currentPlayer) {
+        const hand = orderedHand;
+        const srcIdx = hand.findIndex(c => c.id === ref.cardId);
+        const tgtIdx = hand.findIndex(c => c.id === overCardId);
+        if (srcIdx !== -1 && tgtIdx !== -1 && srcIdx !== tgtIdx) {
+          const newOrder = hand.map(c => c.id);
+          const [removed] = newOrder.splice(srcIdx, 1);
+          newOrder.splice(tgtIdx, 0, removed);
+          setLocalCardOrder(newOrder);
+        }
       }
     }
+
     removeGhost();
     dragRef.current = null;
-    dragStateRef.current = { draggedCardId: null, dragOverCardId: null };
+    dragStateRef.current = { dragOverCardId: null, overDiscardZone: false };
     setDraggedCardId(null);
     setDragOverCardId(null);
-  }, [currentPlayer, orderedHand, setLocalCardOrder, removeGhost]);
+    setOverDiscardZone(false);
+  }, [currentPlayer, orderedHand, setLocalCardOrder, removeGhost, isMyTurn, hasDiscarded, selectedCards, soundEnabled, playSound, onDiscardCards]);
 
   const handleCardPointerDown = useCallback((cardId: string) => {
     dragRef.current = { cardId, moved: false };
-    dragStateRef.current.draggedCardId = cardId;
   }, []);
 
   // Global mouse listeners for desktop drag
@@ -516,9 +547,16 @@ export function GameBoard({
             </div>
           )}
 
-          {/* Center: Wild | Deck | Draw + turn message — sits right below top row, no big gap */}
+          {/* Center: Wild | Deck | Draw + turn message — drop zone for discarding */}
           <div className="flex-1 min-w-0 flex flex-col items-center justify-start gap-2 sm:gap-3 max-w-lg">
-            <div className="flex items-end justify-center gap-2 sm:gap-4 shrink-0">
+            <div
+              data-drop-zone="discard"
+              className={`flex items-end justify-center gap-2 sm:gap-4 shrink-0 rounded-xl p-2 transition-all duration-200 ${
+                overDiscardZone && isMyTurn && !hasDiscarded
+                  ? 'ring-4 ring-orange-400 bg-orange-50/60 scale-105'
+                  : ''
+              }`}
+            >
               {gameState.wildCardRank && (
                 <div className="flex flex-col items-center gap-0.5 sm:gap-1">
                   <div className="text-[10px] sm:text-xs font-semibold text-gray-600 whitespace-nowrap">Wild</div>
